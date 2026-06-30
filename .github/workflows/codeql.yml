@@ -52,3 +52,8 @@ jobs:
         uses: github/codeql-action/analyze@v3
         with:
           category: "/language:java"
+        # continue-on-error: Code scanning upload requires GitHub Advanced
+        # Security (paid for private repos). Remove this line if you enable
+        # Advanced Security in Settings → Security and analysis, or make the
+        # repo public (code scanning is free for public repos).
+        continue-on-error: true
