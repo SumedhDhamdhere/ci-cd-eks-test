@@ -26,3 +26,4 @@ META-INF/
 # OS
 .DS_Store
 Thumbs.db
+k8s/services/secrets.yaml

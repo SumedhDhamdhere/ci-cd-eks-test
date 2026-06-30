@@ -208,6 +208,33 @@ jobs:
           kubectl apply -f k8s/kafka/kafka.yaml
           kubectl apply -f k8s/kong/kong.yaml
           kubectl apply -f k8s/services/configmap.yaml
+
+          # Secrets injected at deploy time — never stored in source control.
+          # Values here are demo credentials matching the ephemeral Kind/Postgres
+          # containers provisioned above.  In a real project these would come from
+          # a secrets manager (AWS Secrets Manager, Vault, GitHub Secrets, etc.).
+          kubectl create secret generic app-secrets -n ecommerce \
+            --from-literal=REDIS_PASSWORD=redis_pass \
+            --from-literal=JWT_SECRET=myProductionSecretKey123456789012345678901234 \
+            --from-literal=AWS_ACCESS_KEY_ID=test \
+            --from-literal=AWS_SECRET_ACCESS_KEY=test \
+            --from-literal=USER_DB_URL=jdbc:postgresql://postgres-user-0.postgres-user.ecommerce.svc.cluster.local:5432/userdb \
+            --from-literal=USER_DB_USER=user_svc \
+            --from-literal=USER_DB_PASS=user_pass \
+            --from-literal=ORDER_DB_URL=jdbc:postgresql://postgres-order-0.postgres-order.ecommerce.svc.cluster.local:5432/orderdb \
+            --from-literal=ORDER_DB_USER=order_svc \
+            --from-literal=ORDER_DB_PASS=order_pass \
+            --from-literal=PRODUCT_DB_URL=jdbc:postgresql://postgres-product-0.postgres-product.ecommerce.svc.cluster.local:5432/productdb \
+            --from-literal=PRODUCT_DB_USER=product_svc \
+            --from-literal=PRODUCT_DB_PASS=product_pass \
+            --from-literal=INVENTORY_DB_URL=jdbc:postgresql://postgres-inventory-0.postgres-inventory.ecommerce.svc.cluster.local:5432/inventorydb \
+            --from-literal=INVENTORY_DB_USER=inventory_svc \
+            --from-literal=INVENTORY_DB_PASS=inventory_pass \
+            --from-literal=PAYMENT_DB_URL=jdbc:postgresql://postgres-payment-0.postgres-payment.ecommerce.svc.cluster.local:5432/paymentdb \
+            --from-literal=PAYMENT_DB_USER=payment_svc \
+            --from-literal=PAYMENT_DB_PASS=payment_pass \
+            --dry-run=client -o yaml | kubectl apply -f -
+
           kubectl apply -f k8s/services/deployments.yaml
           # monitoring.yaml intentionally not applied here — Prometheus/Grafana/
           # Loki aren't needed to validate a CI smoke test and add resource
@@ -340,6 +367,33 @@ jobs:
           kubectl apply -f k8s/kafka/kafka.yaml
           kubectl apply -f k8s/kong/kong.yaml
           kubectl apply -f k8s/services/configmap.yaml
+
+          # Secrets injected at deploy time — never stored in source control.
+          # Values here are demo credentials matching the ephemeral Kind/Postgres
+          # containers provisioned above.  In a real project these would come from
+          # a secrets manager (AWS Secrets Manager, Vault, GitHub Secrets, etc.).
+          kubectl create secret generic app-secrets -n ecommerce \
+            --from-literal=REDIS_PASSWORD=redis_pass \
+            --from-literal=JWT_SECRET=myProductionSecretKey123456789012345678901234 \
+            --from-literal=AWS_ACCESS_KEY_ID=test \
+            --from-literal=AWS_SECRET_ACCESS_KEY=test \
+            --from-literal=USER_DB_URL=jdbc:postgresql://postgres-user-0.postgres-user.ecommerce.svc.cluster.local:5432/userdb \
+            --from-literal=USER_DB_USER=user_svc \
+            --from-literal=USER_DB_PASS=user_pass \
+            --from-literal=ORDER_DB_URL=jdbc:postgresql://postgres-order-0.postgres-order.ecommerce.svc.cluster.local:5432/orderdb \
+            --from-literal=ORDER_DB_USER=order_svc \
+            --from-literal=ORDER_DB_PASS=order_pass \
+            --from-literal=PRODUCT_DB_URL=jdbc:postgresql://postgres-product-0.postgres-product.ecommerce.svc.cluster.local:5432/productdb \
+            --from-literal=PRODUCT_DB_USER=product_svc \
+            --from-literal=PRODUCT_DB_PASS=product_pass \
+            --from-literal=INVENTORY_DB_URL=jdbc:postgresql://postgres-inventory-0.postgres-inventory.ecommerce.svc.cluster.local:5432/inventorydb \
+            --from-literal=INVENTORY_DB_USER=inventory_svc \
+            --from-literal=INVENTORY_DB_PASS=inventory_pass \
+            --from-literal=PAYMENT_DB_URL=jdbc:postgresql://postgres-payment-0.postgres-payment.ecommerce.svc.cluster.local:5432/paymentdb \
+            --from-literal=PAYMENT_DB_USER=payment_svc \
+            --from-literal=PAYMENT_DB_PASS=payment_pass \
+            --dry-run=client -o yaml | kubectl apply -f -
+
           kubectl apply -f k8s/services/deployments.yaml
 
           # Rolling update — K8s replaces pods one by one (zero downtime)
