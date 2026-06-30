@@ -134,12 +134,11 @@ jobs:
           # Tag = git short SHA (e.g. abc1234) — immutable, every commit = unique image
           echo "version=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-      - name: Configure AWS credentials (Floci)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: test
-          aws-secret-access-key: test
-          aws-region: ${{ env.AWS_REGION }}
+      - name: Configure AWS env for Floci
+        run: |
+          echo "AWS_ACCESS_KEY_ID=test" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=test" >> $GITHUB_ENV
+          echo "AWS_DEFAULT_REGION=${{ env.AWS_REGION }}" >> $GITHUB_ENV
 
       - name: Wait for Floci's ECR backing registry
         run: |
@@ -271,12 +270,11 @@ jobs:
         id: meta
         run: echo "version=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-      - name: Configure AWS credentials (Floci)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: test
-          aws-secret-access-key: test
-          aws-region: ${{ env.AWS_REGION }}
+      - name: Configure AWS env for Floci
+        run: |
+          echo "AWS_ACCESS_KEY_ID=test" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=test" >> $GITHUB_ENV
+          echo "AWS_DEFAULT_REGION=${{ env.AWS_REGION }}" >> $GITHUB_ENV
 
       - name: Wait for Floci's ECR backing registry
         run: |
