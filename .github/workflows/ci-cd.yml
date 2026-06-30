@@ -16,10 +16,23 @@
 #   runner's localhost anyway. So prod must push to a real, persistent ECR.
 #
 # Why dev deploys to Kind, not Floci's "EKS":
-#   Floci only simulates the EKS *control-plane API* (DescribeCluster,
-#   etc.) — it does not run real Kubernetes workloads. Kind (Kubernetes
-#   in Docker) provides an actual, disposable cluster inside the CI run
-#   so the K8s manifests get a real rollout, not just a faked API call.
+#   Floci's EKS is more real than it first appears — `aws eks create-cluster`
+#   actually provisions a working k3s cluster that runs real pods. But two
+#   things make it a poor fit for an automated CI job specifically:
+#     1. Pulling pushed images into it requires reaching into the cluster's
+#        container and hand-editing containerd's registry config (verified
+#        by hand — there's no AWS-API-level way to do this), which isn't
+#        something a CI script can reliably automate.
+#     2. Floci's k3s node uses default flannel/overlay pod networking
+#        (10.42.0.0/16), not real VPC-routable pod IPs the way EKS's VPC
+#        CNI does — so an ALB target group with target-type=ip can never
+#        actually reach a pod (verified: target health always reports
+#        Target.FailedHealthChecks).
+#   Kind sidesteps both: images load directly into its node via
+#   `kind load docker-image` (no registry roundtrip needed) and its
+#   networking is CI-friendly out of the box.
+#   (scripts/01-06 still exercise the full Floci EKS+ALB path for learning
+#   purposes — see scripts/README.md — just not as part of automated CI.)
 # ================================================================
 
 name: E-Commerce CI/CD
@@ -138,7 +151,7 @@ jobs:
           done
           cat /tmp/ecr-pass | docker login --username AWS --password-stdin localhost:5100
 
-      - name: Build & push all services to Floci ECR
+      - name: Build all services
         run: |
           IMAGE_TAG=${{ steps.meta.outputs.version }}
           for svc in $SERVICES; do
@@ -147,6 +160,20 @@ jobs:
             docker build -t localhost:5100/ecommerce/$svc:$IMAGE_TAG \
                          -t localhost:5100/ecommerce/$svc:latest \
                          $svc/
+          done
+
+      - name: Scan images for vulnerabilities (Trivy)
+        run: |
+          for svc in $SERVICES; do
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+              aquasec/trivy:latest image --exit-code 1 --severity CRITICAL \
+              --ignore-unfixed localhost:5100/ecommerce/$svc:${{ steps.meta.outputs.version }}
+          done
+
+      - name: Push all services to Floci ECR
+        run: |
+          IMAGE_TAG=${{ steps.meta.outputs.version }}
+          for svc in $SERVICES; do
             docker push localhost:5100/ecommerce/$svc:$IMAGE_TAG
             docker push localhost:5100/ecommerce/$svc:latest
             echo "✅ $svc pushed: $IMAGE_TAG"
@@ -206,6 +233,19 @@ jobs:
           kubectl get svc -n ecommerce
 
   # ── PROD PATH: build + push to REAL ECR (separate from the dev/Floci path) ──
+  #
+  # Build-once-promote-everywhere note: this job builds exactly once per
+  # push to main, and deploy-prod below consumes that exact image_tag
+  # without ever rebuilding — that's the correct half of the pattern.
+  # The other half (deploy the *same* artifact to a staging environment
+  # first, then promote it to prod after approval, with zero rebuild in
+  # between) doesn't apply here yet: the "dev" path deploys to Floci's
+  # ephemeral, per-job-only registry/cluster by design — a learning
+  # sandbox, not a pre-prod gate — so there is no persistent staging
+  # artifact to promote from. If a real staging environment is added
+  # later, point its deploy step at build-push-prod's output instead of
+  # giving it its own build job, so staging and prod always run the
+  # identical binary.
   build-push-prod:
     name: Build & Push Docker Images (Prod)
     runs-on: ubuntu-latest
@@ -245,7 +285,7 @@ jobs:
           aws ecr get-login-password | \
           docker login --username AWS --password-stdin ${{ vars.ECR_REGISTRY_PROD }}
 
-      - name: Build & push all services
+      - name: Build all services
         run: |
           IMAGE_TAG=${{ steps.meta.outputs.version }}
           for svc in $SERVICES; do
@@ -254,6 +294,20 @@ jobs:
             docker build -t ${{ vars.ECR_REGISTRY_PROD }}/ecommerce/$svc:$IMAGE_TAG \
                          -t ${{ vars.ECR_REGISTRY_PROD }}/ecommerce/$svc:latest \
                          $svc/
+          done
+
+      - name: Scan images for vulnerabilities (Trivy)
+        run: |
+          for svc in $SERVICES; do
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+              aquasec/trivy:latest image --exit-code 1 --severity CRITICAL \
+              --ignore-unfixed ${{ vars.ECR_REGISTRY_PROD }}/ecommerce/$svc:${{ steps.meta.outputs.version }}
+          done
+
+      - name: Push all services
+        run: |
+          IMAGE_TAG=${{ steps.meta.outputs.version }}
+          for svc in $SERVICES; do
             docker push ${{ vars.ECR_REGISTRY_PROD }}/ecommerce/$svc:$IMAGE_TAG
             docker push ${{ vars.ECR_REGISTRY_PROD }}/ecommerce/$svc:latest
             echo "✅ $svc pushed: $IMAGE_TAG"

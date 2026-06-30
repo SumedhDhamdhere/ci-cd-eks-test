@@ -13,9 +13,16 @@ export AWS_ACCESS_KEY_ID=test
 export AWS_SECRET_ACCESS_KEY=test
 
 ACCOUNT_ID=000000000000
-REGISTRY=$ACCOUNT_ID.dkr.ecr.ap-south-1.localhost.localstack.cloud:4566
+# Floci backs ECR pushes with a real Docker Registry v2 container on host
+# port 5100 (not the LocalStack-style ...localhost.localstack.cloud:4566
+# hostname — Floci doesn't implement the Docker Registry API there, only
+# the ECR control-plane API).
+REGISTRY=localhost:5100
 SERVICES="user-service product-service order-service inventory-service payment-service notification-service"
-ROOT=$(dirname $(dirname $0))
+# Must be absolute: a relative ROOT (e.g. ".") breaks once the loop below
+# cd's into a service directory — "cd $ROOT" stops pointing at the project
+# root and silently no-ops, leaving subsequent iterations in the wrong dir.
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
 echo "=== [1/4] Create ECR Repos ==="
 for svc in $SERVICES; do
