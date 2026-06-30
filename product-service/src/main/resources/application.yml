@@ -10,7 +10,7 @@ spring:
     password: ${DB_PASSWORD:product_pass}
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
   data:
     redis:
       host: ${REDIS_HOST:redis}

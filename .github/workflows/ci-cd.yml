@@ -5,21 +5,36 @@
 #   feature/* branch → PR → tests run
 #   merge to develop → build + push to Floci-simulated ECR + deploy to an
 #                       ephemeral local Kind cluster (stands in for EKS)
-#   merge to main    → build + push to REAL ECR + deploy to REAL EKS
-#                       (requires manual approval — see the `production`
-#                       GitHub Environment)
+#   merge to main    → same mechanism, gated behind manual approval (see
+#                       the `production` GitHub Environment)
 #
-# Why dev and prod use different jobs for build/push (not the same one):
-#   Floci's registry (localhost:5100) only exists for the lifetime of the
-#   `build-push-deploy-dev` job's runner — it is gone by the time any other
-#   job starts, and real EKS nodes could never reach a GitHub-hosted
-#   runner's localhost anyway. So prod must push to a real, persistent ECR.
+# This project intentionally never touches real AWS — everything runs
+# against Floci. "Prod" here means "the approval-gated path," not "real
+# infrastructure." Dev and prod each get their own fresh Floci + Kind
+# (GitHub Actions jobs are isolated runners — nothing from one job's
+# Floci/registry/cluster persists into another job), so there's no
+# single shared artifact to promote between them; the meaningful
+# difference is the required-reviewer gate on the `production`
+# Environment, not the underlying infrastructure.
 #
-# Why dev deploys to Kind, not Floci's "EKS":
-#   Floci only simulates the EKS *control-plane API* (DescribeCluster,
-#   etc.) — it does not run real Kubernetes workloads. Kind (Kubernetes
-#   in Docker) provides an actual, disposable cluster inside the CI run
-#   so the K8s manifests get a real rollout, not just a faked API call.
+# Why dev (and prod) deploy to Kind, not Floci's "EKS":
+#   Floci's EKS is more real than it first appears — `aws eks create-cluster`
+#   actually provisions a working k3s cluster that runs real pods. But two
+#   things make it a poor fit for an automated CI job specifically:
+#     1. Pulling pushed images into it requires reaching into the cluster's
+#        container and hand-editing containerd's registry config (verified
+#        by hand — there's no AWS-API-level way to do this), which isn't
+#        something a CI script can reliably automate.
+#     2. Floci's k3s node uses default flannel/overlay pod networking
+#        (10.42.0.0/16), not real VPC-routable pod IPs the way EKS's VPC
+#        CNI does — so an ALB target group with target-type=ip can never
+#        actually reach a pod (verified: target health always reports
+#        Target.FailedHealthChecks).
+#   Kind sidesteps both: images load directly into its node via
+#   `kind load docker-image` (no registry roundtrip needed) and its
+#   networking is CI-friendly out of the box.
+#   (scripts/01-06 still exercise the full Floci EKS+ALB path for learning
+#   purposes — see scripts/README.md — just not as part of automated CI.)
 # ================================================================
 
 name: E-Commerce CI/CD
@@ -119,12 +134,11 @@ jobs:
           # Tag = git short SHA (e.g. abc1234) — immutable, every commit = unique image
           echo "version=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-      - name: Configure AWS credentials (Floci)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: test
-          aws-secret-access-key: test
-          aws-region: ${{ env.AWS_REGION }}
+      - name: Configure AWS env for Floci
+        run: |
+          echo "AWS_ACCESS_KEY_ID=test" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=test" >> $GITHUB_ENV
+          echo "AWS_DEFAULT_REGION=${{ env.AWS_REGION }}" >> $GITHUB_ENV
 
       - name: Wait for Floci's ECR backing registry
         run: |
@@ -138,7 +152,7 @@ jobs:
           done
           cat /tmp/ecr-pass | docker login --username AWS --password-stdin localhost:5100
 
-      - name: Build & push all services to Floci ECR
+      - name: Build all services
         run: |
           IMAGE_TAG=${{ steps.meta.outputs.version }}
           for svc in $SERVICES; do
@@ -147,6 +161,20 @@ jobs:
             docker build -t localhost:5100/ecommerce/$svc:$IMAGE_TAG \
                          -t localhost:5100/ecommerce/$svc:latest \
                          $svc/
+          done
+
+      - name: Scan images for vulnerabilities (Trivy)
+        run: |
+          for svc in $SERVICES; do
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+              aquasec/trivy:latest image --exit-code 1 --severity CRITICAL \
+              --ignore-unfixed localhost:5100/ecommerce/$svc:${{ steps.meta.outputs.version }}
+          done
+
+      - name: Push all services to Floci ECR
+        run: |
+          IMAGE_TAG=${{ steps.meta.outputs.version }}
+          for svc in $SERVICES; do
             docker push localhost:5100/ecommerce/$svc:$IMAGE_TAG
             docker push localhost:5100/ecommerce/$svc:latest
             echo "✅ $svc pushed: $IMAGE_TAG"
@@ -180,6 +208,33 @@ jobs:
           kubectl apply -f k8s/kafka/kafka.yaml
           kubectl apply -f k8s/kong/kong.yaml
           kubectl apply -f k8s/services/configmap.yaml
+
+          # Secrets injected at deploy time — never stored in source control.
+          # Values here are demo credentials matching the ephemeral Kind/Postgres
+          # containers provisioned above.  In a real project these would come from
+          # a secrets manager (AWS Secrets Manager, Vault, GitHub Secrets, etc.).
+          kubectl create secret generic app-secrets -n ecommerce \
+            --from-literal=REDIS_PASSWORD=redis_pass \
+            --from-literal=JWT_SECRET=myProductionSecretKey123456789012345678901234 \
+            --from-literal=AWS_ACCESS_KEY_ID=test \
+            --from-literal=AWS_SECRET_ACCESS_KEY=test \
+            --from-literal=USER_DB_URL=jdbc:postgresql://postgres-user-0.postgres-user.ecommerce.svc.cluster.local:5432/userdb \
+            --from-literal=USER_DB_USER=user_svc \
+            --from-literal=USER_DB_PASS=user_pass \
+            --from-literal=ORDER_DB_URL=jdbc:postgresql://postgres-order-0.postgres-order.ecommerce.svc.cluster.local:5432/orderdb \
+            --from-literal=ORDER_DB_USER=order_svc \
+            --from-literal=ORDER_DB_PASS=order_pass \
+            --from-literal=PRODUCT_DB_URL=jdbc:postgresql://postgres-product-0.postgres-product.ecommerce.svc.cluster.local:5432/productdb \
+            --from-literal=PRODUCT_DB_USER=product_svc \
+            --from-literal=PRODUCT_DB_PASS=product_pass \
+            --from-literal=INVENTORY_DB_URL=jdbc:postgresql://postgres-inventory-0.postgres-inventory.ecommerce.svc.cluster.local:5432/inventorydb \
+            --from-literal=INVENTORY_DB_USER=inventory_svc \
+            --from-literal=INVENTORY_DB_PASS=inventory_pass \
+            --from-literal=PAYMENT_DB_URL=jdbc:postgresql://postgres-payment-0.postgres-payment.ecommerce.svc.cluster.local:5432/paymentdb \
+            --from-literal=PAYMENT_DB_USER=payment_svc \
+            --from-literal=PAYMENT_DB_PASS=payment_pass \
+            --dry-run=client -o yaml | kubectl apply -f -
+
           kubectl apply -f k8s/services/deployments.yaml
           # monitoring.yaml intentionally not applied here — Prometheus/Grafana/
           # Loki aren't needed to validate a CI smoke test and add resource
@@ -205,15 +260,27 @@ jobs:
           kubectl get pods -n ecommerce
           kubectl get svc -n ecommerce
 
-  # ── PROD PATH: build + push to REAL ECR (separate from the dev/Floci path) ──
-  build-push-prod:
-    name: Build & Push Docker Images (Prod)
+  # ── PROD PATH: same mechanism as dev (Floci + Kind), gated behind a
+  # required-reviewer approval on the `production` GitHub Environment.
+  # No real AWS credentials anywhere in this job, by design.
+  build-push-deploy-prod:
+    name: Build, Push & Deploy to PROD (Floci, approval-gated)
     runs-on: ubuntu-latest
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: production  # requires manual approval in GitHub
 
-    outputs:
-      image_tag: ${{ steps.meta.outputs.version }}
+    services:
+      floci:
+        image: floci/floci:latest
+        ports:
+          - 4566:4566
+        options: >-
+          -v /var/run/docker.sock:/var/run/docker.sock
+          --health-cmd "curl -f http://localhost:4566/_floci/health"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Checkout
@@ -230,78 +297,118 @@ jobs:
         id: meta
         run: echo "version=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-      - name: Configure AWS credentials (real AWS)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      # vars.ECR_REGISTRY_PROD must be set once under
-      # Settings → Secrets and variables → Actions → Variables, e.g.
-      # 123456789012.dkr.ecr.ap-south-1.amazonaws.com
-      - name: Login to real ECR
+      - name: Configure AWS env for Floci
         run: |
-          aws ecr get-login-password | \
-          docker login --username AWS --password-stdin ${{ vars.ECR_REGISTRY_PROD }}
+          echo "AWS_ACCESS_KEY_ID=test" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=test" >> $GITHUB_ENV
+          echo "AWS_DEFAULT_REGION=${{ env.AWS_REGION }}" >> $GITHUB_ENV
 
-      - name: Build & push all services
+      - name: Wait for Floci's ECR backing registry
+        run: |
+          aws ecr get-login-password --endpoint-url http://localhost:4566 > /tmp/ecr-pass
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:5100/v2/ && break
+            echo "waiting for floci ecr registry... ($i/30)"
+            sleep 2
+          done
+          cat /tmp/ecr-pass | docker login --username AWS --password-stdin localhost:5100
+
+      - name: Build all services
         run: |
           IMAGE_TAG=${{ steps.meta.outputs.version }}
           for svc in $SERVICES; do
             echo "=== Building $svc ==="
             cd $svc && mvn package -DskipTests -q && cd ..
-            docker build -t ${{ vars.ECR_REGISTRY_PROD }}/ecommerce/$svc:$IMAGE_TAG \
-                         -t ${{ vars.ECR_REGISTRY_PROD }}/ecommerce/$svc:latest \
+            docker build -t localhost:5100/ecommerce/$svc:$IMAGE_TAG \
+                         -t localhost:5100/ecommerce/$svc:latest \
                          $svc/
-            docker push ${{ vars.ECR_REGISTRY_PROD }}/ecommerce/$svc:$IMAGE_TAG
-            docker push ${{ vars.ECR_REGISTRY_PROD }}/ecommerce/$svc:latest
+          done
+
+      - name: Scan images for vulnerabilities (Trivy)
+        run: |
+          for svc in $SERVICES; do
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+              aquasec/trivy:latest image --exit-code 1 --severity CRITICAL \
+              --ignore-unfixed localhost:5100/ecommerce/$svc:${{ steps.meta.outputs.version }}
+          done
+
+      - name: Push all services to Floci ECR
+        run: |
+          IMAGE_TAG=${{ steps.meta.outputs.version }}
+          for svc in $SERVICES; do
+            docker push localhost:5100/ecommerce/$svc:$IMAGE_TAG
+            docker push localhost:5100/ecommerce/$svc:latest
             echo "✅ $svc pushed: $IMAGE_TAG"
           done
 
-  deploy-prod:
-    name: Deploy to PROD
-    runs-on: ubuntu-latest
-    needs: build-push-prod
-    if: github.ref == 'refs/heads/main'
-    environment: production  # requires manual approval in GitHub
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Create local Kind cluster
+        uses: helm/kind-action@v1
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+          cluster_name: ecommerce-prod
+          wait: 120s
 
-      - name: Set up kubectl
+      - name: Load images into Kind
         run: |
-          aws eks update-kubeconfig \
-            --name ecommerce-cluster \
-            --region ${{ env.AWS_REGION }}
+          IMAGE_TAG=${{ steps.meta.outputs.version }}
+          for svc in $SERVICES; do
+            kind load docker-image localhost:5100/ecommerce/$svc:$IMAGE_TAG --name ecommerce-prod
+          done
 
-      - name: Blue-Green Deploy to PROD
+      - name: Deploy to ecommerce namespace
         run: |
-          IMAGE_TAG=${{ needs.build-push-prod.outputs.image_tag }}
-
-          sed -i "s|REGISTRY/ecommerce|${{ vars.ECR_REGISTRY_PROD }}/ecommerce|g" k8s/services/deployments.yaml
+          IMAGE_TAG=${{ steps.meta.outputs.version }}
+          sed -i "s|REGISTRY/ecommerce|localhost:5100/ecommerce|g" k8s/services/deployments.yaml
           sed -i "s|IMAGE_TAG|$IMAGE_TAG|g" k8s/services/deployments.yaml
+          sed -i "/image: localhost:5100/a\\        imagePullPolicy: IfNotPresent" k8s/services/deployments.yaml
 
-          kubectl apply -f k8s/services/deployments.yaml -n ecommerce
+          kubectl apply -f k8s/namespace/namespace.yaml
+          kubectl apply -f k8s/postgres/postgres.yaml
+          kubectl apply -f k8s/redis/redis.yaml
+          kubectl apply -f k8s/kafka/kafka.yaml
+          kubectl apply -f k8s/kong/kong.yaml
+          kubectl apply -f k8s/services/configmap.yaml
+
+          # Secrets injected at deploy time — never stored in source control.
+          # Values here are demo credentials matching the ephemeral Kind/Postgres
+          # containers provisioned above.  In a real project these would come from
+          # a secrets manager (AWS Secrets Manager, Vault, GitHub Secrets, etc.).
+          kubectl create secret generic app-secrets -n ecommerce \
+            --from-literal=REDIS_PASSWORD=redis_pass \
+            --from-literal=JWT_SECRET=myProductionSecretKey123456789012345678901234 \
+            --from-literal=AWS_ACCESS_KEY_ID=test \
+            --from-literal=AWS_SECRET_ACCESS_KEY=test \
+            --from-literal=USER_DB_URL=jdbc:postgresql://postgres-user-0.postgres-user.ecommerce.svc.cluster.local:5432/userdb \
+            --from-literal=USER_DB_USER=user_svc \
+            --from-literal=USER_DB_PASS=user_pass \
+            --from-literal=ORDER_DB_URL=jdbc:postgresql://postgres-order-0.postgres-order.ecommerce.svc.cluster.local:5432/orderdb \
+            --from-literal=ORDER_DB_USER=order_svc \
+            --from-literal=ORDER_DB_PASS=order_pass \
+            --from-literal=PRODUCT_DB_URL=jdbc:postgresql://postgres-product-0.postgres-product.ecommerce.svc.cluster.local:5432/productdb \
+            --from-literal=PRODUCT_DB_USER=product_svc \
+            --from-literal=PRODUCT_DB_PASS=product_pass \
+            --from-literal=INVENTORY_DB_URL=jdbc:postgresql://postgres-inventory-0.postgres-inventory.ecommerce.svc.cluster.local:5432/inventorydb \
+            --from-literal=INVENTORY_DB_USER=inventory_svc \
+            --from-literal=INVENTORY_DB_PASS=inventory_pass \
+            --from-literal=PAYMENT_DB_URL=jdbc:postgresql://postgres-payment-0.postgres-payment.ecommerce.svc.cluster.local:5432/paymentdb \
+            --from-literal=PAYMENT_DB_USER=payment_svc \
+            --from-literal=PAYMENT_DB_PASS=payment_pass \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          kubectl apply -f k8s/services/deployments.yaml
 
           # Rolling update — K8s replaces pods one by one (zero downtime)
           for svc in $SERVICES; do
             kubectl rollout status deployment/$svc -n ecommerce --timeout=300s
+            echo "✅ $svc deployed"
           done
 
-      - name: Smoke test after deploy
+      - name: Smoke test via Kong
         run: |
-          KONG_URL=$(kubectl get svc kong-proxy -n ecommerce -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-          echo "Kong URL: $KONG_URL"
-          curl -f http://$KONG_URL/api/users/health || exit 1
+          kubectl port-forward -n ecommerce svc/kong-proxy 8000:80 &
+          sleep 5
+          curl -f -X POST http://localhost:8000/api/users/register \
+            -H "Content-Type: application/json" \
+            -d '{"name":"CI Prod Smoke Test","email":"ci-prod-smoke-test@example.com","password":"password123"}'
           echo "✅ Smoke test passed"
 
       - name: Rollback on failure
@@ -309,5 +416,11 @@ jobs:
         run: |
           echo "Deploy failed — rolling back"
           for svc in $SERVICES; do
-            kubectl rollout undo deployment/$svc -n ecommerce
+            kubectl rollout undo deployment/$svc -n ecommerce || true
           done
+
+      - name: Pod status (always shown for debugging)
+        if: always()
+        run: |
+          kubectl get pods -n ecommerce
+          kubectl get svc -n ecommerce

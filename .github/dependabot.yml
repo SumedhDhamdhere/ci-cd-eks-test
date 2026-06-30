@@ -1,0 +1,85 @@
+version: 2
+updates:
+  # Parent POM + each service's own pom.xml — Dependabot needs a separate
+  # entry per directory that contains a pom.xml, it doesn't recurse.
+  - package-ecosystem: maven
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      spring-boot:
+        patterns: ["org.springframework*"]
+
+  - package-ecosystem: maven
+    directory: /user-service
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: maven
+    directory: /product-service
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: maven
+    directory: /order-service
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: maven
+    directory: /inventory-service
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: maven
+    directory: /payment-service
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: maven
+    directory: /notification-service
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  # Docker base images (eclipse-temurin in each service's Dockerfile)
+  - package-ecosystem: docker
+    directory: /user-service
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /product-service
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /order-service
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /inventory-service
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /payment-service
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /notification-service
+    schedule:
+      interval: weekly
+
+  # The CI/CD workflow's own action versions (actions/checkout, etc.)
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
