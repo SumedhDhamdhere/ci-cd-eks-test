@@ -1,0 +1,185 @@
+# ================================================================
+# Kong API Gateway on Kubernetes
+# DB-less mode = config in ConfigMap, no extra DB needed
+# All external traffic enters here first
+# ================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kong-config
+  namespace: ecommerce
+data:
+  kong.yml: |
+    _format_version: "3.0"
+    services:
+      - name: user-service
+        url: http://user-service.ecommerce.svc.cluster.local:8081
+        routes:
+          - name: user-routes
+            paths: [/api/users]
+            strip_path: false
+      - name: product-service
+        url: http://product-service.ecommerce.svc.cluster.local:8082
+        routes:
+          - name: product-routes
+            paths: [/api/products]
+            strip_path: false
+      - name: order-service
+        url: http://order-service.ecommerce.svc.cluster.local:8083
+        routes:
+          - name: order-routes
+            paths: [/api/orders]
+            strip_path: false
+      - name: inventory-service
+        url: http://inventory-service.ecommerce.svc.cluster.local:8084
+        routes:
+          - name: inventory-routes
+            paths: [/api/inventory]
+            strip_path: false
+      - name: payment-service
+        url: http://payment-service.ecommerce.svc.cluster.local:8085
+        routes:
+          - name: payment-routes
+            paths: [/api/payments]
+            strip_path: false
+      - name: notification-service
+        url: http://notification-service.ecommerce.svc.cluster.local:8086
+        routes:
+          - name: notification-routes
+            paths: [/api/notifications]
+            strip_path: false
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: 1000
+          hour: 50000
+          policy: local
+      - name: correlation-id
+        config:
+          header_name: X-Request-ID
+          generator: uuid
+      - name: prometheus
+        config:
+          status_code_metrics: true
+          latency_metrics: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kong
+  namespace: ecommerce
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: kong
+  template:
+    metadata:
+      labels:
+        app: kong
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8001"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: kong
+        image: kong:3.4
+        ports:
+        - containerPort: 8000  # Proxy (client traffic)
+        - containerPort: 8001  # Admin API
+        env:
+        - name: KONG_DATABASE
+          value: "off"
+        - name: KONG_DECLARATIVE_CONFIG
+          value: /kong/declarative/kong.yml
+        - name: KONG_PROXY_ACCESS_LOG
+          value: /dev/stdout
+        - name: KONG_ADMIN_ACCESS_LOG
+          value: /dev/stdout
+        - name: KONG_PROXY_ERROR_LOG
+          value: /dev/stderr
+        - name: KONG_ADMIN_LISTEN
+          value: "0.0.0.0:8001"
+        - name: KONG_STATUS_LISTEN
+          value: "0.0.0.0:8100"
+        volumeMounts:
+        - name: kong-config
+          mountPath: /kong/declarative
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /status
+            port: 8100
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /status
+            port: 8100
+          initialDelaySeconds: 15
+          periodSeconds: 5
+      volumes:
+      - name: kong-config
+        configMap:
+          name: kong-config
+---
+# External LoadBalancer — this becomes the ALB on AWS
+apiVersion: v1
+kind: Service
+metadata:
+  name: kong-proxy
+  namespace: ecommerce
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "alb"
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+spec:
+  type: LoadBalancer
+  selector:
+    app: kong
+  ports:
+  - name: proxy
+    port: 80
+    targetPort: 8000
+  - name: proxy-ssl
+    port: 443
+    targetPort: 8000
+---
+# Internal service for admin API
+apiVersion: v1
+kind: Service
+metadata:
+  name: kong-admin
+  namespace: ecommerce
+spec:
+  selector:
+    app: kong
+  ports:
+  - port: 8001
+    targetPort: 8001
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: kong-hpa
+  namespace: ecommerce
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: kong
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 60

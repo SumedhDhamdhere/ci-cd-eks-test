@@ -1,0 +1,28 @@
+# Maven
+target/
+*.jar
+*.war
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+
+# Environment (secrets never in git)
+scripts/.env
+*.env
+.env.local
+
+# Docker
+.dockerignore
+
+# Floci runtime state (simulated AWS resource dumps, regenerated locally)
+floci-data/
+
+# Stray extracted build artifact
+META-INF/
+
+# OS
+.DS_Store
+Thumbs.db

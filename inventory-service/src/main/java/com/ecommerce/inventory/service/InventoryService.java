@@ -1,0 +1,69 @@
+package com.ecommerce.inventory.service;
+import com.ecommerce.inventory.model.Inventory;
+import com.ecommerce.inventory.repository.InventoryRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import java.util.concurrent.TimeUnit;
+
+@Service @RequiredArgsConstructor @Slf4j
+public class InventoryService {
+    private final InventoryRepository inventoryRepository;
+    private final RedisTemplate<String, String> redisTemplate;
+    private static final String LOCK_PREFIX = "inventory:lock:";
+    private static final long LOCK_TTL = 30;
+
+    @Transactional
+    public boolean reserveStock(Long productId, Integer quantity, Long orderId) {
+        String lockKey = LOCK_PREFIX + productId;
+
+        // Redis distributed lock — prevents overselling
+        Boolean locked = redisTemplate.opsForValue()
+                .setIfAbsent(lockKey, orderId.toString(), LOCK_TTL, TimeUnit.SECONDS);
+
+        if (Boolean.FALSE.equals(locked)) {
+            log.warn("Could not acquire lock for productId={}", productId);
+            return false;
+        }
+
+        try {
+            Inventory inventory = inventoryRepository.findByProductId(productId)
+                    .orElseThrow(() -> new RuntimeException("Product not found in inventory"));
+
+            int available = inventory.getQuantity() - inventory.getReserved();
+            if (available < quantity) {
+                log.warn("Insufficient stock for productId={}, available={}, requested={}", productId, available, quantity);
+                return false;
+            }
+
+            inventory.setReserved(inventory.getReserved() + quantity);
+            inventoryRepository.save(inventory);
+            log.info("Stock reserved: productId={}, quantity={}, orderId={}", productId, quantity, orderId);
+            return true;
+        } finally {
+            // Always release lock
+            redisTemplate.delete(lockKey);
+        }
+    }
+
+    @Transactional
+    public void releaseStock(Long productId, Integer quantity) {
+        Inventory inventory = inventoryRepository.findByProductId(productId)
+                .orElseThrow(() -> new RuntimeException("Product not found"));
+        inventory.setReserved(Math.max(0, inventory.getReserved() - quantity));
+        inventoryRepository.save(inventory);
+        log.info("Stock released: productId={}, quantity={}", productId, quantity);
+    }
+
+    @Transactional
+    public void confirmStock(Long productId, Integer quantity) {
+        Inventory inventory = inventoryRepository.findByProductId(productId)
+                .orElseThrow(() -> new RuntimeException("Product not found"));
+        inventory.setReserved(Math.max(0, inventory.getReserved() - quantity));
+        inventory.setQuantity(inventory.getQuantity() - quantity);
+        inventoryRepository.save(inventory);
+        log.info("Stock confirmed deducted: productId={}, quantity={}", productId, quantity);
+    }
+}

@@ -1,0 +1,86 @@
+_format_version: "3.0"
+
+services:
+  - name: user-service
+    url: http://host.docker.internal:8081
+    routes:
+      - name: user-routes
+        paths:
+          - /api/users
+        strip_path: false
+        methods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+
+  - name: product-service
+    url: http://host.docker.internal:8082
+    routes:
+      - name: product-routes
+        paths:
+          - /api/products
+        strip_path: false
+        methods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+
+  - name: order-service
+    url: http://host.docker.internal:8083
+    routes:
+      - name: order-routes
+        paths:
+          - /api/orders
+        strip_path: false
+        methods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+
+  - name: inventory-service
+    url: http://host.docker.internal:8084
+    routes:
+      - name: inventory-routes
+        paths:
+          - /api/inventory
+        strip_path: false
+        methods:
+          - GET
+          - POST
+          - PUT
+
+  - name: payment-service
+    url: http://host.docker.internal:8085
+    routes:
+      - name: payment-routes
+        paths:
+          - /api/payments
+        strip_path: false
+        methods:
+          - GET
+          - POST
+
+  - name: notification-service
+    url: http://host.docker.internal:8086
+    routes:
+      - name: notification-routes
+        paths:
+          - /api/notifications
+        strip_path: false
+        methods:
+          - GET
+
+plugins:
+  - name: rate-limiting
+    config:
+      minute: 1000
+      hour: 10000
+      policy: local
+
+  - name: correlation-id
+    config:
+      header_name: X-Request-ID
+      generator: uuid
