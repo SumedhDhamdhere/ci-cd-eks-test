@@ -10,7 +10,7 @@ spring:
     password: ${DB_PASSWORD:inventory_pass}
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP:kafka:9092}
     consumer:

@@ -10,7 +10,7 @@ spring:
     password: ${DB_PASSWORD:order_pass}
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
     show-sql: false
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP:kafka:9092}
