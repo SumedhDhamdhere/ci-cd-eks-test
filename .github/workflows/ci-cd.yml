@@ -292,20 +292,19 @@ jobs:
       - name: Start full stack (docker-compose, pre-built images)
         run: |
           docker compose up -d --no-build
-          echo "Waiting for all 6 services to be ready behind Kong..."
-          # Each Spring Boot service needs 60-120s on a 2-CPU runner.
-          # Wait until /api/products returns 200 three times in a row — this
-          # confirms product-service is stable, not just momentarily responding.
-          CONSECUTIVE=0
+          echo "Waiting for ALL services to be ready behind Kong..."
+          # Check every service the smoke test will hit.
+          # Only proceed when all return 200 — Kong 503 means that specific
+          # Spring Boot service is still starting (takes 60-120s each).
           for i in $(seq 1 120); do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/products)
-            if [ "$STATUS" = "200" ]; then
-              CONSECUTIVE=$((CONSECUTIVE+1))
-              echo "Attempt $i: 200 OK ($CONSECUTIVE/3 consecutive)"
-              [ "$CONSECUTIVE" -ge 3 ] && echo "All services stable." && break
-            else
-              CONSECUTIVE=0
-              echo "Attempt $i: status=$STATUS..."
+            P=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/products)
+            U=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8000/api/users/login \
+                  -H "Content-Type: application/json" -d '{"email":"x@x.com","password":"x"}')
+            O=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/orders/user/1)
+            echo "Attempt $i: products=$P users=$U orders=$O"
+            # users returns 401 (wrong creds) = service is UP. orders returns 200 or 404 = UP.
+            if [ "$P" = "200" ] && [ "$U" != "503" ] && [ "$U" != "000" ] && [ "$O" != "503" ] && [ "$O" != "000" ]; then
+              echo "All services ready!"; break
             fi
             sleep 5
           done
