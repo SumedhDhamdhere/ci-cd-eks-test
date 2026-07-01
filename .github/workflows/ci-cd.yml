@@ -203,14 +203,25 @@ jobs:
           IMAGE_TAG=${{ steps.meta.outputs.version }}
           sed -i "s|REGISTRY/ecommerce|localhost:5100/ecommerce|g" k8s/services/deployments.yaml
           sed -i "s|IMAGE_TAG|$IMAGE_TAG|g" k8s/services/deployments.yaml
-          # Images were loaded directly into Kind's node containerd cache above,
-          # so the cluster never needs to actually reach localhost:5100 itself.
-          sed -i "/image: localhost:5100/a\\        imagePullPolicy: IfNotPresent" k8s/services/deployments.yaml
+          # Never: images were loaded directly into Kind's containerd cache via
+          # `kind load docker-image` above — they cannot be pulled from localhost:5100
+          # (Kind pods can't reach the host's docker-published port 5100).
+          sed -i "/image: localhost:5100/a\\        imagePullPolicy: Never" k8s/services/deployments.yaml
 
           kubectl apply -f k8s/namespace/namespace.yaml
           kubectl apply -f k8s/postgres/postgres.yaml
           kubectl apply -f k8s/redis/redis.yaml
           kubectl apply -f k8s/kafka/kafka.yaml
+
+          echo "Waiting for data layer to be ready before deploying services..."
+          kubectl wait --for=condition=ready pod -l app=postgres-user      -n ecommerce --timeout=180s
+          kubectl wait --for=condition=ready pod -l app=postgres-order     -n ecommerce --timeout=180s
+          kubectl wait --for=condition=ready pod -l app=postgres-product   -n ecommerce --timeout=180s
+          kubectl wait --for=condition=ready pod -l app=postgres-inventory -n ecommerce --timeout=180s
+          kubectl wait --for=condition=ready pod -l app=postgres-payment   -n ecommerce --timeout=180s
+          kubectl wait --for=condition=ready pod -l app=redis              -n ecommerce --timeout=120s
+          kubectl wait --for=condition=ready pod -l app=kafka              -n ecommerce --timeout=180s
+
           kubectl apply -f k8s/kong/kong.yaml
           kubectl apply -f k8s/services/configmap.yaml
 
@@ -246,7 +257,7 @@ jobs:
           # overhead the CI runner doesn't have to spare.
 
           for svc in $SERVICES; do
-            kubectl rollout status deployment/$svc -n ecommerce --timeout=300s
+            kubectl rollout status deployment/$svc -n ecommerce --timeout=600s
             echo "✅ $svc deployed"
           done
 
@@ -408,7 +419,7 @@ jobs:
 
           # Rolling update — K8s replaces pods one by one (zero downtime)
           for svc in $SERVICES; do
-            kubectl rollout status deployment/$svc -n ecommerce --timeout=300s
+            kubectl rollout status deployment/$svc -n ecommerce --timeout=600s
             echo "✅ $svc deployed"
           done
 

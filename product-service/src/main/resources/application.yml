@@ -24,3 +24,5 @@ management:
     web:
       exposure:
         include: health,info,metrics
+  flyway:
+    connect-retries: 15
