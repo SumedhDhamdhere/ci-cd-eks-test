@@ -65,11 +65,11 @@ public class InventoryService {
         if (quantity == null || quantity <= 0) {
             throw new IllegalArgumentException("Restock quantity must be positive");
         }
+        // Single atomic INSERT ... ON CONFLICT — safe even if the product.created
+        // consumer is concurrently creating the same product_id row.
+        inventoryRepository.upsertStock(productId, quantity);
         Inventory inventory = inventoryRepository.findByProductId(productId)
-                .orElseGet(() -> Inventory.builder()
-                        .productId(productId).quantity(0).reserved(0).build());
-        inventory.setQuantity(inventory.getQuantity() + quantity);
-        inventory = inventoryRepository.save(inventory);
+                .orElseThrow(() -> new RuntimeException("Restock failed for productId=" + productId));
         log.info("Restocked productId={}, added={}, newQuantity={}", productId, quantity, inventory.getQuantity());
         return inventory;
     }
