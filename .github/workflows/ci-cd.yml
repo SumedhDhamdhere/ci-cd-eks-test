@@ -288,12 +288,21 @@ jobs:
       - name: Start full stack (docker-compose, pre-built images)
         run: |
           docker compose up -d --no-build
-          echo "Waiting for all services to be ready via Kong..."
-          # Wait for GET /api/products to return 200 (not 503 = Kong up but service not ready)
-          for i in $(seq 1 100); do
+          echo "Waiting for all 6 services to be ready behind Kong..."
+          # Each Spring Boot service needs 60-120s on a 2-CPU runner.
+          # Wait until /api/products returns 200 three times in a row — this
+          # confirms product-service is stable, not just momentarily responding.
+          CONSECUTIVE=0
+          for i in $(seq 1 120); do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/products)
-            if [ "$STATUS" = "200" ]; then echo "Services ready (attempt $i)"; break; fi
-            echo "Attempt $i: status=$STATUS, waiting..."
+            if [ "$STATUS" = "200" ]; then
+              CONSECUTIVE=$((CONSECUTIVE+1))
+              echo "Attempt $i: 200 OK ($CONSECUTIVE/3 consecutive)"
+              [ "$CONSECUTIVE" -ge 3 ] && echo "All services stable." && break
+            else
+              CONSECUTIVE=0
+              echo "Attempt $i: status=$STATUS..."
+            fi
             sleep 5
           done
 
