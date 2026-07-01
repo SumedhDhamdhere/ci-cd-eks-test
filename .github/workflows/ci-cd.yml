@@ -102,10 +102,13 @@ jobs:
           cache: true
 
       - name: Create k3d cluster
-        uses: AbsaOSS/k3d-action@v2
-        with:
-          cluster-name: ecommerce
-          args: --agents 1 --wait --timeout 120s
+        run: |
+          # Install latest k3d directly (the pinned action used an old version
+          # whose download URL now 404s). install.sh always resolves a valid release.
+          curl -sfL https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+          k3d version
+          k3d cluster create ecommerce --agents 1 --wait --timeout 120s
+          kubectl cluster-info
 
       - name: Import images into cluster
         run: |
@@ -206,10 +209,13 @@ jobs:
           wait
 
       - name: Create k3d cluster
-        uses: AbsaOSS/k3d-action@v2
-        with:
-          cluster-name: ecommerce
-          args: --agents 1 --wait --timeout 120s
+        run: |
+          # Install latest k3d directly (the pinned action used an old version
+          # whose download URL now 404s). install.sh always resolves a valid release.
+          curl -sfL https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+          k3d version
+          k3d cluster create ecommerce --agents 1 --wait --timeout 120s
+          kubectl cluster-info
 
       - name: Import images into cluster
         run: |
