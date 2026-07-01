@@ -288,10 +288,13 @@ jobs:
       - name: Start full stack (docker-compose, pre-built images)
         run: |
           docker compose up -d --no-build
-          echo "Waiting for Kong gateway to be ready..."
-          for i in $(seq 1 60); do
-            curl -sf http://localhost:8000/api/products -o /dev/null && break
-            sleep 3
+          echo "Waiting for all services to be ready via Kong..."
+          # Wait for GET /api/products to return 200 (not 503 = Kong up but service not ready)
+          for i in $(seq 1 100); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/products)
+            if [ "$STATUS" = "200" ]; then echo "Services ready (attempt $i)"; break; fi
+            echo "Attempt $i: status=$STATUS, waiting..."
+            sleep 5
           done
 
       - name: Smoke test all endpoints via Kong
