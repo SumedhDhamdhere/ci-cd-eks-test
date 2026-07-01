@@ -14,6 +14,7 @@ const OUTPUT = path.join(DOCS_DIR, 'ALL_DOCS.html');
 
 // Doc order for the combined PDF
 const DOC_ORDER = [
+  'MASTER_GUIDE.md',
   'ONBOARDING.md',
   'ARCHITECTURE.md',
   'DEVELOPER_GUIDE.md',
@@ -27,8 +28,10 @@ const DOC_ORDER = [
 function md2html(md) {
   return md
     // Fenced code blocks (must come before inline code)
-    .replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) =>
-      `<pre class="code-block"><code class="lang-${lang}">${esc(code.trim())}</code></pre>`)
+    .replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+      if (lang === 'mermaid') return `<pre class="mermaid">${code.trim()}</pre>`;
+      return `<pre class="code-block"><code class="lang-${lang}">${esc(code.trim())}</code></pre>`;
+    })
     // Headers
     .replace(/^#### (.+)$/gm, '<h4>$1</h4>')
     .replace(/^### (.+)$/gm, '<h3>$1</h3>')
@@ -86,6 +89,7 @@ const CSS = `
   pre.code-block { background: #1e1e1e; color: #d4d4d4; padding: 16px; border-radius: 6px;
                    overflow-x: auto; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
   pre.code-block code { background: none; color: inherit; padding: 0; }
+  pre.mermaid { background: #fff; text-align: center; page-break-inside: avoid; margin: 20px 0; }
   table { border-collapse: collapse; width: 100%; margin: 16px 0; }
   th, td { border: 1px solid #ccc; padding: 8px 12px; text-align: left; }
   th { background: #e3f2fd; font-weight: 600; }
@@ -111,6 +115,10 @@ let allHtml = `<!DOCTYPE html>
 <meta charset="UTF-8">
 <title>E-Commerce Platform — Complete Documentation</title>
 <style>${CSS}</style>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>
+  if (window.mermaid) { mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'loose' }); }
+</script>
 </head>
 <body>
 <div class="doc-title">
