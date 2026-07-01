@@ -155,14 +155,18 @@ jobs:
           done
 
       - name: Scan images for vulnerabilities (Trivy)
-        run: |
-          # exit-code 0 = report, not block. CVEs in eclipse-temurin base image
-          # can't be patched here — Dependabot Docker updates handle upgrades.
-          for svc in $SERVICES; do
-            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-              aquasec/trivy:latest image --exit-code 0 --severity CRITICAL,HIGH \
-              --ignore-unfixed localhost:5100/ecommerce/$svc:${{ steps.meta.outputs.version }}
-          done
+        uses: aquasecurity/trivy-action@master
+        with:
+          # Scan just one representative image — all 6 share the same
+          # eclipse-temurin:21-jre-alpine base, so one scan covers the OS CVEs.
+          image-ref: localhost:5100/ecommerce/user-service:${{ steps.meta.outputs.version }}
+          format: table
+          exit-code: '0'
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          # Cache the DB between runs — avoids downloading 100MB every push
+          cache: true
+          trivy-config: ''
 
       - name: Push all services to Floci ECR
         run: |
