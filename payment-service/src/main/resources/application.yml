@@ -10,7 +10,7 @@ spring:
     password: ${DB_PASSWORD:payment_pass}
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP:kafka:9092}
     consumer:
@@ -27,3 +27,8 @@ management:
     web:
       exposure:
         include: health,info,metrics
+  flyway:
+    connect-retries: 15
+  kafka:
+    admin:
+      fail-fast: false

@@ -28,4 +28,21 @@ public class OrderEventConsumer {
             log.error("Error processing inventory.updated event: {}", e.getMessage());
         }
     }
+
+    // Completes the saga: payment succeeded → order becomes PAID; payment failed
+    // → order is cancelled. Without this a paid order would stay PENDING forever.
+    @KafkaListener(topics = "payment.processed", groupId = "order-service-group", concurrency = "6")
+    public void handlePaymentProcessed(String message) {
+        try {
+            JsonNode event = objectMapper.readTree(message);
+            Long orderId = event.get("orderId").asLong();
+            if (event.get("success").asBoolean()) {
+                orderService.markPaid(orderId);
+            } else {
+                orderService.cancelDueToPaymentFailure(orderId, "Payment failed");
+            }
+        } catch (Exception e) {
+            log.error("Error processing payment.processed event: {}", e.getMessage());
+        }
+    }
 }

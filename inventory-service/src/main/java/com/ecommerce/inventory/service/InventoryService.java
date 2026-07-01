@@ -57,6 +57,28 @@ public class InventoryService {
         log.info("Stock released: productId={}, quantity={}", productId, quantity);
     }
 
+    // Add stock for a product. Creates the inventory row if the product.created
+    // event hasn't arrived yet (upsert) — a warehouse must be able to stock a
+    // product regardless of Kafka timing.
+    @Transactional
+    public Inventory restock(Long productId, Integer quantity) {
+        if (quantity == null || quantity <= 0) {
+            throw new IllegalArgumentException("Restock quantity must be positive");
+        }
+        // Single atomic INSERT ... ON CONFLICT — safe even if the product.created
+        // consumer is concurrently creating the same product_id row.
+        inventoryRepository.upsertStock(productId, quantity);
+        Inventory inventory = inventoryRepository.findByProductId(productId)
+                .orElseThrow(() -> new RuntimeException("Restock failed for productId=" + productId));
+        log.info("Restocked productId={}, added={}, newQuantity={}", productId, quantity, inventory.getQuantity());
+        return inventory;
+    }
+
+    public Inventory getStock(Long productId) {
+        return inventoryRepository.findByProductId(productId)
+                .orElseThrow(() -> new RuntimeException("Product not found in inventory: " + productId));
+    }
+
     @Transactional
     public void confirmStock(Long productId, Integer quantity) {
         Inventory inventory = inventoryRepository.findByProductId(productId)

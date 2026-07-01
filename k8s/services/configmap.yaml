@@ -8,36 +8,14 @@ metadata:
   name: app-config
   namespace: ecommerce
 data:
-  KAFKA_BOOTSTRAP_SERVERS: "kafka-0.kafka.ecommerce.svc.cluster.local:9092,kafka-1.kafka.ecommerce.svc.cluster.local:9092,kafka-2.kafka.ecommerce.svc.cluster.local:9092"
+  KAFKA_BOOTSTRAP_SERVERS: "kafka-0.kafka.ecommerce.svc.cluster.local:9092"
   REDIS_HOST: "redis-0.redis.ecommerce.svc.cluster.local"
   REDIS_PORT: "6379"
   AWS_ENDPOINT_URL: "http://floci.ecommerce.svc.cluster.local:4566"
   AWS_DEFAULT_REGION: "ap-south-1"
   SPRING_PROFILE: "prod"
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: app-secrets
-  namespace: ecommerce
-type: Opaque
-stringData:
-  REDIS_PASSWORD: "redis_pass"
-  JWT_SECRET: "myProductionSecretKey123456789012345678901234"
-  AWS_ACCESS_KEY_ID: "test"
-  AWS_SECRET_ACCESS_KEY: "test"
-  USER_DB_URL: "jdbc:postgresql://postgres-user-0.postgres-user.ecommerce.svc.cluster.local:5432/userdb"
-  USER_DB_USER: "user_svc"
-  USER_DB_PASS: "user_pass"
-  ORDER_DB_URL: "jdbc:postgresql://postgres-order-0.postgres-order.ecommerce.svc.cluster.local:5432/orderdb"
-  ORDER_DB_USER: "order_svc"
-  ORDER_DB_PASS: "order_pass"
-  PRODUCT_DB_URL: "jdbc:postgresql://postgres-product-0.postgres-product.ecommerce.svc.cluster.local:5432/productdb"
-  PRODUCT_DB_USER: "product_svc"
-  PRODUCT_DB_PASS: "product_pass"
-  INVENTORY_DB_URL: "jdbc:postgresql://postgres-inventory-0.postgres-inventory.ecommerce.svc.cluster.local:5432/inventorydb"
-  INVENTORY_DB_USER: "inventory_svc"
-  INVENTORY_DB_PASS: "inventory_pass"
-  PAYMENT_DB_URL: "jdbc:postgresql://postgres-payment-0.postgres-payment.ecommerce.svc.cluster.local:5432/paymentdb"
-  PAYMENT_DB_USER: "payment_svc"
-  PAYMENT_DB_PASS: "payment_pass"
+# Secret intentionally NOT stored in source control.
+# The CI deploy step creates the app-secrets Secret via kubectl before
+# applying these manifests. For local runs use:
+#   kubectl apply -f k8s/services/secrets.example.yaml
+# See scripts/README.md for the correct secret injection pattern.

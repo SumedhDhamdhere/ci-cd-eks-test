@@ -69,6 +69,32 @@ public class OrderService {
         return saved;
     }
 
+    // Payment succeeded → complete the saga by marking the order PAID.
+    // Without this the order would sit at PENDING forever after a successful payment.
+    @Transactional
+    public void markPaid(Long orderId) {
+        Order order = orderRepository.findById(orderId).orElse(null);
+        if (order == null || order.getStatus() != Order.OrderStatus.PENDING) {
+            return; // already terminal (e.g. cancelled) — don't override
+        }
+        order.setStatus(Order.OrderStatus.PAID);
+        orderRepository.save(order);
+        log.info("Order {} marked PAID", orderId);
+    }
+
+    // Payment failed → cancel the order and release reserved stock via the event.
+    @Transactional
+    public void cancelDueToPaymentFailure(Long orderId, String reason) {
+        Order order = orderRepository.findById(orderId).orElse(null);
+        if (order == null || order.getStatus() == Order.OrderStatus.CANCELLED) {
+            return;
+        }
+        order.setStatus(Order.OrderStatus.CANCELLED);
+        Order saved = orderRepository.save(order);
+        eventPublisher.publishOrderCancelled(saved, reason);
+        log.warn("Order {} cancelled due to payment failure: {}", orderId, reason);
+    }
+
     @Transactional
     public void cancelDueToOutOfStock(Long orderId, String reason) {
         Order order = orderRepository.findById(orderId).orElse(null);
