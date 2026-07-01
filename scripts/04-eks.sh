@@ -87,5 +87,27 @@ echo "=== [5/5] Configure kubectl ==="
 aws eks update-kubeconfig --name ecommerce-cluster --region ap-south-1
 kubectl get nodes
 
+echo "=== [FLOCI FIX] Configure k3s to pull from Floci ECR ==="
+# k3s runs inside a Floci-managed Docker container. By default it tries to pull
+# images from Docker Hub. We redirect localhost:5100 to the Floci ECR registry
+# container (floci-ecr-registry:5000) which is on the same Docker network.
+K3S_CONTAINER=$(docker ps --filter "name=floci" --filter "name=k3s" --format "{{.Names}}" | head -1)
+if [ -n "$K3S_CONTAINER" ]; then
+  docker exec "$K3S_CONTAINER" sh -c 'mkdir -p /etc/rancher/k3s && cat > /etc/rancher/k3s/registries.yaml << '"'"'EOF'"'"'
+mirrors:
+  "localhost:5100":
+    endpoint:
+      - "http://floci-ecr-registry:5000"
+EOF
+'
+  # Reload k3s config without restarting
+  docker exec "$K3S_CONTAINER" sh -c 'kill -SIGHUP 1 2>/dev/null || true'
+  echo "  ✅ k3s configured to pull from Floci ECR (localhost:5100 → floci-ecr-registry:5000)"
+else
+  echo "  ⚠️  Could not find Floci k3s container. If pods get ImagePullBackOff, run manually:"
+  echo "      docker exec <floci-k3s-container> sh -c 'mkdir -p /etc/rancher/k3s && echo ...'"
+fi
+
+echo "REGISTRY=localhost:5100" >> $(dirname $0)/.env
 echo "EKS_CLUSTER=ecommerce-cluster" >> $(dirname $0)/.env
 echo "✅ EKS done. Next: ./scripts/05-deploy.sh"
