@@ -36,14 +36,27 @@
 </style>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <script>
-  if (window.mermaid) { mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'loose' }); }
+  if (window.mermaid) {
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'base',
+      securityLevel: 'loose',
+      fontFamily: 'Segoe UI, sans-serif',
+      themeVariables: {
+        primaryColor: '#e3f2fd', primaryTextColor: '#0d47a1', primaryBorderColor: '#1976d2',
+        lineColor: '#546e7a', fontSize: '15px'
+      },
+      flowchart: { htmlLabels: true, curve: 'basis', nodeSpacing: 40, rankSpacing: 50 },
+      sequence: { actorMargin: 40, width: 150, mirrorActors: false }
+    });
+  }
 </script>
 </head>
 <body>
 <div class="doc-title">
   <h1>E-Commerce Platform</h1>
   <p>Complete Documentation Suite · Spring Boot · Kafka · Kubernetes · Floci (AWS)</p>
-  <p style="color:#90caf9; font-size:13px">Generated: 1/7/2026</p>
+  <p style="color:#90caf9; font-size:13px">Generated: 2/7/2026</p>
 </div>
 
 <!-- ===== MASTER_GUIDE.md ===== -->
@@ -1285,28 +1298,40 @@ This ensures zero-downtime deployments — new pods only receive traffic when fu
 
 <p>Every code change goes through automated testing, security scanning, image building, and deployment before it ever runs in "production."</p>
 
-<pre class="code-block"><code class="lang-">Developer pushes code
-        │
-        ▼
-┌───────────────────────────────────────────────────────┐
-│                  GitHub Actions                       │
-│                                                       │
-│  JOB 1: TEST                                         │
-│  ├── mvn test (all 6 services)                       │
-│  ├── JaCoCo coverage ≥ 50%                           │
-│  └── CodeQL SAST scan                                │
-│                    │                                  │
-│          ┌─────────┴──────────┐                      │
-│          │ push to develop    │ push to main          │
-│          ▼                    ▼                       │
-│  JOB 2: BUILD + DEV   JOB 3: BUILD + PROD           │
-│  ├── Build images             ├── Build images        │
-│  ├── Trivy scan               ├── Trivy scan          │
-│  ├── Push to Floci ECR        ├── Push to Floci ECR  │
-│  ├── docker-compose up        │   ⏸ APPROVAL GATE    │
-│  └── Smoke test               ├── docker-compose up   │
-│                               └── Smoke test          │
-└───────────────────────────────────────────────────────┘</code></pre>
+<pre class="mermaid">flowchart TD
+    DEV([Developer pushes code]) --> TRIG{Trigger}
+
+<p>    TRIG -->|PR or push| T[TEST job<br/>6 services in parallel matrix<br/>mvn test]</p>
+    TRIG -.CodeQL.-> SAST[Security scan<br/>CodeQL SAST]
+
+<p>    T --> BR{Which branch?}</p>
+
+<p>    BR -->|push to develop| DDEV[Deploy to DEV]</p>
+    BR -->|push to main| DPROD[Deploy to PROD]
+
+<p>    subgraph DEVJOB [DEV pipeline - automatic]</p>
+        DDEV --> B1[Parallel Maven build + 6 images]
+        B1 --> TR1[Trivy scan]
+        TR1 --> K1[Create k3d cluster]
+        K1 --> DEP1[Deploy k8s manifests]
+        DEP1 --> SM1[Smoke test: 16 endpoints + order to PAID]
+    end
+
+<p>    subgraph PRODJOB [PROD pipeline - gated]</p>
+        DPROD --> GATE[/"⏸ APPROVAL GATE<br/>required reviewer"/]
+        GATE --> B2[Build + images]
+        B2 --> K2[Create k3d cluster]
+        K2 --> DEP2[Deploy k8s manifests]
+        DEP2 --> SM2[Smoke test: 16 endpoints + order to PAID]
+    end
+
+<p>    SM1 --> OK1([DEV green])</p>
+    SM2 --> OK2([PROD green])
+
+<p>    classDef gate fill:#ffe0b2,stroke:#e65100,stroke-width:2px;</p>
+    classDef pass fill:#c8e6c9,stroke:#2e7d32;
+    class GATE gate;
+    class OK1,OK2 pass;</pre>
 
 <hr>
 

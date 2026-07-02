@@ -4,29 +4,41 @@
 
 Every code change goes through automated testing, security scanning, image building, and deployment before it ever runs in "production."
 
-```
-Developer pushes code
-        │
-        ▼
-┌───────────────────────────────────────────────────────┐
-│                  GitHub Actions                       │
-│                                                       │
-│  JOB 1: TEST                                         │
-│  ├── mvn test (all 6 services)                       │
-│  ├── JaCoCo coverage ≥ 50%                           │
-│  └── CodeQL SAST scan                                │
-│                    │                                  │
-│          ┌─────────┴──────────┐                      │
-│          │ push to develop    │ push to main          │
-│          ▼                    ▼                       │
-│  JOB 2: BUILD + DEV   JOB 3: BUILD + PROD           │
-│  ├── Build images             ├── Build images        │
-│  ├── Trivy scan               ├── Trivy scan          │
-│  ├── Push to Floci ECR        ├── Push to Floci ECR  │
-│  ├── docker-compose up        │   ⏸ APPROVAL GATE    │
-│  └── Smoke test               ├── docker-compose up   │
-│                               └── Smoke test          │
-└───────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    DEV([Developer pushes code]) --> TRIG{Trigger}
+
+    TRIG -->|PR or push| T[TEST job<br/>6 services in parallel matrix<br/>mvn test]
+    TRIG -.CodeQL.-> SAST[Security scan<br/>CodeQL SAST]
+
+    T --> BR{Which branch?}
+
+    BR -->|push to develop| DDEV[Deploy to DEV]
+    BR -->|push to main| DPROD[Deploy to PROD]
+
+    subgraph DEVJOB [DEV pipeline - automatic]
+        DDEV --> B1[Parallel Maven build + 6 images]
+        B1 --> TR1[Trivy scan]
+        TR1 --> K1[Create k3d cluster]
+        K1 --> DEP1[Deploy k8s manifests]
+        DEP1 --> SM1[Smoke test: 16 endpoints + order to PAID]
+    end
+
+    subgraph PRODJOB [PROD pipeline - gated]
+        DPROD --> GATE[/"⏸ APPROVAL GATE<br/>required reviewer"/]
+        GATE --> B2[Build + images]
+        B2 --> K2[Create k3d cluster]
+        K2 --> DEP2[Deploy k8s manifests]
+        DEP2 --> SM2[Smoke test: 16 endpoints + order to PAID]
+    end
+
+    SM1 --> OK1([DEV green])
+    SM2 --> OK2([PROD green])
+
+    classDef gate fill:#ffe0b2,stroke:#e65100,stroke-width:2px;
+    classDef pass fill:#c8e6c9,stroke:#2e7d32;
+    class GATE gate;
+    class OK1,OK2 pass;
 ```
 
 ---

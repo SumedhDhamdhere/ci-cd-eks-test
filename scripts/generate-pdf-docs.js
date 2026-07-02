@@ -109,44 +109,69 @@ const CSS = `
   }
 `;
 
-let allHtml = `<!DOCTYPE html>
+const HEAD = (title) => `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>E-Commerce Platform — Complete Documentation</title>
+<title>${title}</title>
 <style>${CSS}</style>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <script>
-  if (window.mermaid) { mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'loose' }); }
+  if (window.mermaid) {
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'base',
+      securityLevel: 'loose',
+      fontFamily: 'Segoe UI, sans-serif',
+      themeVariables: {
+        primaryColor: '#e3f2fd', primaryTextColor: '#0d47a1', primaryBorderColor: '#1976d2',
+        lineColor: '#546e7a', fontSize: '15px'
+      },
+      flowchart: { htmlLabels: true, curve: 'basis', nodeSpacing: 40, rankSpacing: 50 },
+      sequence: { actorMargin: 40, width: 150, mirrorActors: false }
+    });
+  }
 </script>
 </head>
 <body>
-<div class="doc-title">
+`;
+
+const TITLE_CARD = `<div class="doc-title">
   <h1>E-Commerce Platform</h1>
   <p>Complete Documentation Suite · Spring Boot · Kafka · Kubernetes · Floci (AWS)</p>
   <p style="color:#90caf9; font-size:13px">Generated: ${new Date().toLocaleDateString()}</p>
 </div>
 `;
 
+// Build combined doc AND one standalone HTML per doc (for per-doc PDFs)
+const PDF_HTML_DIR = path.join(DOCS_DIR, 'pdf-src');
+fs.mkdirSync(PDF_HTML_DIR, { recursive: true });
+
+let allHtml = HEAD('E-Commerce Platform — Complete Documentation') + TITLE_CARD;
 let found = 0;
+const perDoc = [];
+
 for (const docFile of DOC_ORDER) {
   const filePath = path.join(DOCS_DIR, docFile);
-  if (!fs.existsSync(filePath)) {
-    console.warn(`  SKIP (not found): ${docFile}`);
-    continue;
-  }
+  if (!fs.existsSync(filePath)) { console.warn(`  SKIP (not found): ${docFile}`); continue; }
   const raw = fs.readFileSync(filePath, 'utf-8');
-  allHtml += `\n<!-- ===== ${docFile} ===== -->\n<section>\n${md2html(raw)}\n</section>\n`;
+  const body = md2html(raw);
+  allHtml += `\n<!-- ===== ${docFile} ===== -->\n<section>\n${body}\n</section>\n`;
+
+  // standalone HTML for this single doc
+  const base = docFile.replace(/\.md$/, '');
+  const singleHtml = HEAD(base) + `<section>\n${body}\n</section>\n</body></html>`;
+  const singlePath = path.join(PDF_HTML_DIR, base + '.html');
+  fs.writeFileSync(singlePath, singleHtml, 'utf-8');
+  perDoc.push(base);
+
   console.log(`  ✓ ${docFile}`);
   found++;
 }
-
 allHtml += '</body></html>';
-
 fs.writeFileSync(OUTPUT, allHtml, 'utf-8');
-console.log(`\n✅ ${found} docs → ${OUTPUT}`);
-console.log('\nTo create PDFs:');
-console.log('  1. Open docs/ALL_DOCS.html in Chrome');
-console.log('  2. File > Print  (or Ctrl+P)');
-console.log('  3. Destination → Save as PDF');
-console.log('  4. Layout: Portrait, Margins: Default, ☑ Background graphics');
+
+console.log(`\n✅ ${found} docs`);
+console.log(`   combined  → ${OUTPUT}`);
+console.log(`   per-doc   → ${PDF_HTML_DIR}\\*.html`);
+console.log(`   docs list: ${perDoc.join(' ')}`);
