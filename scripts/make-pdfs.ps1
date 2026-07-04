@@ -18,11 +18,17 @@ if (-not $chrome) { throw "Chrome/Edge not found" }
 function Convert-One($htmlPath, $pdfPath) {
   if (Test-Path $pdfPath) { Remove-Item $pdfPath -Force }
   $uri = "file:///" + ($htmlPath -replace '\\','/')
-  & $chrome --headless=new --disable-gpu --no-sandbox `
-    --run-all-compositor-stages-before-draw --virtual-time-budget=25000 `
-    --no-pdf-header-footer --print-to-pdf="$pdfPath" $uri 2>$null 1>$null
-  $global:LASTEXITCODE = 0
-  Start-Sleep -Seconds 2
+  foreach ($attempt in 1..2) {
+    # Unique profile dir so headless Chrome never collides with your open browser.
+    $udd = Join-Path $env:TEMP ("chrome-pdf-" + [guid]::NewGuid().ToString('N'))
+    & $chrome --headless=new --disable-gpu --no-sandbox --user-data-dir="$udd" `
+      --run-all-compositor-stages-before-draw --virtual-time-budget=45000 `
+      --no-pdf-header-footer --print-to-pdf="$pdfPath" $uri 2>$null 1>$null
+    $global:LASTEXITCODE = 0
+    Start-Sleep -Seconds 3
+    Remove-Item $udd -Recurse -Force -ErrorAction SilentlyContinue
+    if (Test-Path $pdfPath) { break }
+  }
   if (Test-Path $pdfPath) {
     "{0,-34} {1,6:N0} KB" -f (Split-Path $pdfPath -Leaf), ((Get-Item $pdfPath).Length/1KB)
   } else { "FAILED: $pdfPath" }
