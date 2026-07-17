@@ -23,8 +23,8 @@ services:
     container_name: postgres-user
     environment:
       POSTGRES_DB: userdb
-      POSTGRES_USER: user_svc
-      POSTGRES_PASSWORD: user_pass
+      POSTGRES_USER: ${USER_DB_USER}
+      POSTGRES_PASSWORD: ${USER_DB_PASS}
     ports:
       - "5432:5432"
     volumes:
@@ -35,8 +35,8 @@ services:
     container_name: postgres-product
     environment:
       POSTGRES_DB: productdb
-      POSTGRES_USER: product_svc
-      POSTGRES_PASSWORD: product_pass
+      POSTGRES_USER: ${PRODUCT_DB_USER}
+      POSTGRES_PASSWORD: ${PRODUCT_DB_PASS}
     ports:
       - "5433:5432"
     volumes:
@@ -47,8 +47,8 @@ services:
     container_name: postgres-order
     environment:
       POSTGRES_DB: orderdb
-      POSTGRES_USER: order_svc
-      POSTGRES_PASSWORD: order_pass
+      POSTGRES_USER: ${ORDER_DB_USER}
+      POSTGRES_PASSWORD: ${ORDER_DB_PASS}
     ports:
       - "5434:5432"
     volumes:
@@ -59,8 +59,8 @@ services:
     container_name: postgres-inventory
     environment:
       POSTGRES_DB: inventorydb
-      POSTGRES_USER: inventory_svc
-      POSTGRES_PASSWORD: inventory_pass
+      POSTGRES_USER: ${INVENTORY_DB_USER}
+      POSTGRES_PASSWORD: ${INVENTORY_DB_PASS}
     ports:
       - "5435:5432"
     volumes:
@@ -71,8 +71,8 @@ services:
     container_name: postgres-payment
     environment:
       POSTGRES_DB: paymentdb
-      POSTGRES_USER: payment_svc
-      POSTGRES_PASSWORD: payment_pass
+      POSTGRES_USER: ${PAYMENT_DB_USER}
+      POSTGRES_PASSWORD: ${PAYMENT_DB_PASS}
     ports:
       - "5436:5432"
     volumes:
@@ -83,7 +83,7 @@ services:
     container_name: redis
     ports:
       - "6379:6379"
-    command: redis-server --requirepass redis_pass
+    command: redis-server --requirepass ${REDIS_PASSWORD}
     volumes:
       - redis_data:/data
 
@@ -157,11 +157,11 @@ services:
       - kafka
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-user:5432/userdb
-      SPRING_DATASOURCE_USERNAME: user_svc
-      SPRING_DATASOURCE_PASSWORD: user_pass
+      SPRING_DATASOURCE_USERNAME: ${USER_DB_USER}
+      SPRING_DATASOURCE_PASSWORD: ${USER_DB_PASS}
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
-      SPRING_DATA_REDIS_PASSWORD: redis_pass
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD}
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
 
   product-service:
@@ -178,11 +178,11 @@ services:
       - kafka
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-product:5432/productdb
-      SPRING_DATASOURCE_USERNAME: product_svc
-      SPRING_DATASOURCE_PASSWORD: product_pass
+      SPRING_DATASOURCE_USERNAME: ${PRODUCT_DB_USER}
+      SPRING_DATASOURCE_PASSWORD: ${PRODUCT_DB_PASS}
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
-      SPRING_DATA_REDIS_PASSWORD: redis_pass
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD}
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
 
   order-service:
@@ -199,11 +199,11 @@ services:
       - kafka
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-order:5432/orderdb
-      SPRING_DATASOURCE_USERNAME: order_svc
-      SPRING_DATASOURCE_PASSWORD: order_pass
+      SPRING_DATASOURCE_USERNAME: ${ORDER_DB_USER}
+      SPRING_DATASOURCE_PASSWORD: ${ORDER_DB_PASS}
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
-      SPRING_DATA_REDIS_PASSWORD: redis_pass
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD}
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
 
   inventory-service:
@@ -220,11 +220,11 @@ services:
       - kafka
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-inventory:5432/inventorydb
-      SPRING_DATASOURCE_USERNAME: inventory_svc
-      SPRING_DATASOURCE_PASSWORD: inventory_pass
+      SPRING_DATASOURCE_USERNAME: ${INVENTORY_DB_USER}
+      SPRING_DATASOURCE_PASSWORD: ${INVENTORY_DB_PASS}
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
-      SPRING_DATA_REDIS_PASSWORD: redis_pass
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD}
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
 
   payment-service:
@@ -241,11 +241,11 @@ services:
       - kafka
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-payment:5432/paymentdb
-      SPRING_DATASOURCE_USERNAME: payment_svc
-      SPRING_DATASOURCE_PASSWORD: payment_pass
+      SPRING_DATASOURCE_USERNAME: ${PAYMENT_DB_USER}
+      SPRING_DATASOURCE_PASSWORD: ${PAYMENT_DB_PASS}
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
-      SPRING_DATA_REDIS_PASSWORD: redis_pass
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD}
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
 
   notification-service:
@@ -262,7 +262,7 @@ services:
     environment:
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
-      SPRING_DATA_REDIS_PASSWORD: redis_pass
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD}
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
 
 volumes:

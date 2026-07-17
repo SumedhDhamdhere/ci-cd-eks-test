@@ -6,8 +6,8 @@ spring:
     name: user-service
   datasource:
     url: jdbc:postgresql://${DB_HOST:postgres-user}:${DB_PORT:5432}/userdb
-    username: ${DB_USER:user_svc}
-    password: ${DB_PASSWORD:user_pass}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
   jpa:
     hibernate:
       ddl-auto: validate
@@ -16,12 +16,12 @@ spring:
     redis:
       host: ${REDIS_HOST:redis}
       port: ${REDIS_PORT:6379}
-      password: ${REDIS_PASSWORD:redis_pass}
+      password: ${REDIS_PASSWORD}
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP:kafka:9092}
 
 jwt:
-  secret: mySecretKey123456789012345678901234567890
+  secret: ${JWT_SECRET}
   expiration: 86400000
 
 management:

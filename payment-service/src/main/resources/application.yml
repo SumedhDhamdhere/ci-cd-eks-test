@@ -6,8 +6,8 @@ spring:
     name: payment-service
   datasource:
     url: jdbc:postgresql://${DB_HOST:postgres-payment}:${DB_PORT:5432}/paymentdb
-    username: ${DB_USER:payment_svc}
-    password: ${DB_PASSWORD:payment_pass}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
   jpa:
     hibernate:
       ddl-auto: validate

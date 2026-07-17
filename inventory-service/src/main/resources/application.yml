@@ -6,8 +6,8 @@ spring:
     name: inventory-service
   datasource:
     url: jdbc:postgresql://${DB_HOST:postgres-inventory}:${DB_PORT:5432}/inventorydb
-    username: ${DB_USER:inventory_svc}
-    password: ${DB_PASSWORD:inventory_pass}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
   jpa:
     hibernate:
       ddl-auto: validate
@@ -22,7 +22,7 @@ spring:
     redis:
       host: ${REDIS_HOST:redis}
       port: ${REDIS_PORT:6379}
-      password: ${REDIS_PASSWORD:redis_pass}
+      password: ${REDIS_PASSWORD}
 
 management:
   endpoints:

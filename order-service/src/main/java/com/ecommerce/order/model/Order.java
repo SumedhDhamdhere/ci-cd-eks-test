@@ -9,7 +9,8 @@ import java.util.List;
 @Table(name = "orders")
 @Data @NoArgsConstructor @AllArgsConstructor @Builder
 public class Order {
-    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Id @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "orders_seq")
+    @SequenceGenerator(name = "orders_seq", sequenceName = "orders_seq", allocationSize = 50)
     private Long id;
     @Column(nullable = false) private Long userId;
     @Enumerated(EnumType.STRING) @Builder.Default

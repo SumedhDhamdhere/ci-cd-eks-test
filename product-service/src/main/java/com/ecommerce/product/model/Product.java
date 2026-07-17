@@ -8,7 +8,8 @@ import java.time.LocalDateTime;
 @Entity @Table(name = "products")
 @Data @NoArgsConstructor @AllArgsConstructor @Builder
 public class Product implements Serializable {
-    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Id @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "products_seq")
+    @SequenceGenerator(name = "products_seq", sequenceName = "products_seq", allocationSize = 50)
     private Long id;
     @Column(nullable = false) private String name;
     private String description;

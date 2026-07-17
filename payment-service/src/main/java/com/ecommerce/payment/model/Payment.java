@@ -7,7 +7,8 @@ import java.time.LocalDateTime;
 @Entity @Table(name = "payments")
 @Data @NoArgsConstructor @AllArgsConstructor @Builder
 public class Payment {
-    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Id @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "payments_seq")
+    @SequenceGenerator(name = "payments_seq", sequenceName = "payments_seq", allocationSize = 50)
     private Long id;
     @Column(nullable = false) private Long orderId;
     @Column(nullable = false) private Long userId;

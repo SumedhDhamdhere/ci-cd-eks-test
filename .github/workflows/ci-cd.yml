@@ -62,6 +62,11 @@ jobs:
           distribution: 'temurin'
           cache: maven
       - name: Unit test
+        env:
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          DB_USER: test
+          DB_PASSWORD: test
+          REDIS_PASSWORD: test
         run: mvn -B -pl ${{ matrix.service }} -am test
 
   # ── JOB 2: DEPLOY TO DEV (real K8s + full saga smoke test) ───────────────
@@ -120,20 +125,20 @@ jobs:
         run: |
           kubectl apply -f k8s/namespace/namespace.yaml
           kubectl create secret generic app-secrets -n ecommerce \
-            --from-literal=REDIS_PASSWORD=redis_pass \
-            --from-literal=JWT_SECRET=ci_jwt_secret_at_least_32_chars_long \
-            --from-literal=AWS_ACCESS_KEY_ID=test \
-            --from-literal=AWS_SECRET_ACCESS_KEY=test \
+            --from-literal=REDIS_PASSWORD="${{ secrets.REDIS_PASSWORD }}" \
+            --from-literal=JWT_SECRET="${{ secrets.JWT_SECRET }}" \
+            --from-literal=AWS_ACCESS_KEY_ID="${{ secrets.FLOCI_AWS_ACCESS_KEY_ID }}" \
+            --from-literal=AWS_SECRET_ACCESS_KEY="${{ secrets.FLOCI_AWS_SECRET_ACCESS_KEY }}" \
             --from-literal=USER_DB_URL='jdbc:postgresql://postgres-user-0.postgres-user.ecommerce.svc.cluster.local:5432/userdb' \
-            --from-literal=USER_DB_USER=user_svc --from-literal=USER_DB_PASS=user_pass \
+            --from-literal=USER_DB_USER="${{ secrets.USER_DB_USER }}" --from-literal=USER_DB_PASS="${{ secrets.USER_DB_PASS }}" \
             --from-literal=ORDER_DB_URL='jdbc:postgresql://postgres-order-0.postgres-order.ecommerce.svc.cluster.local:5432/orderdb' \
-            --from-literal=ORDER_DB_USER=order_svc --from-literal=ORDER_DB_PASS=order_pass \
+            --from-literal=ORDER_DB_USER="${{ secrets.ORDER_DB_USER }}" --from-literal=ORDER_DB_PASS="${{ secrets.ORDER_DB_PASS }}" \
             --from-literal=PRODUCT_DB_URL='jdbc:postgresql://postgres-product-0.postgres-product.ecommerce.svc.cluster.local:5432/productdb' \
-            --from-literal=PRODUCT_DB_USER=product_svc --from-literal=PRODUCT_DB_PASS=product_pass \
+            --from-literal=PRODUCT_DB_USER="${{ secrets.PRODUCT_DB_USER }}" --from-literal=PRODUCT_DB_PASS="${{ secrets.PRODUCT_DB_PASS }}" \
             --from-literal=INVENTORY_DB_URL='jdbc:postgresql://postgres-inventory-0.postgres-inventory.ecommerce.svc.cluster.local:5432/inventorydb' \
-            --from-literal=INVENTORY_DB_USER=inventory_svc --from-literal=INVENTORY_DB_PASS=inventory_pass \
+            --from-literal=INVENTORY_DB_USER="${{ secrets.INVENTORY_DB_USER }}" --from-literal=INVENTORY_DB_PASS="${{ secrets.INVENTORY_DB_PASS }}" \
             --from-literal=PAYMENT_DB_URL='jdbc:postgresql://postgres-payment-0.postgres-payment.ecommerce.svc.cluster.local:5432/paymentdb' \
-            --from-literal=PAYMENT_DB_USER=payment_svc --from-literal=PAYMENT_DB_PASS=payment_pass
+            --from-literal=PAYMENT_DB_USER="${{ secrets.PAYMENT_DB_USER }}" --from-literal=PAYMENT_DB_PASS="${{ secrets.PAYMENT_DB_PASS }}"
           kubectl apply -f k8s/services/configmap.yaml
 
       - name: Deploy data layer (Postgres, Redis, Kafka)
@@ -227,20 +232,20 @@ jobs:
         run: |
           kubectl apply -f k8s/namespace/namespace.yaml
           kubectl create secret generic app-secrets -n ecommerce \
-            --from-literal=REDIS_PASSWORD=redis_pass \
-            --from-literal=JWT_SECRET=ci_jwt_secret_at_least_32_chars_long \
-            --from-literal=AWS_ACCESS_KEY_ID=test \
-            --from-literal=AWS_SECRET_ACCESS_KEY=test \
+            --from-literal=REDIS_PASSWORD="${{ secrets.REDIS_PASSWORD }}" \
+            --from-literal=JWT_SECRET="${{ secrets.JWT_SECRET }}" \
+            --from-literal=AWS_ACCESS_KEY_ID="${{ secrets.FLOCI_AWS_ACCESS_KEY_ID }}" \
+            --from-literal=AWS_SECRET_ACCESS_KEY="${{ secrets.FLOCI_AWS_SECRET_ACCESS_KEY }}" \
             --from-literal=USER_DB_URL='jdbc:postgresql://postgres-user-0.postgres-user.ecommerce.svc.cluster.local:5432/userdb' \
-            --from-literal=USER_DB_USER=user_svc --from-literal=USER_DB_PASS=user_pass \
+            --from-literal=USER_DB_USER="${{ secrets.USER_DB_USER }}" --from-literal=USER_DB_PASS="${{ secrets.USER_DB_PASS }}" \
             --from-literal=ORDER_DB_URL='jdbc:postgresql://postgres-order-0.postgres-order.ecommerce.svc.cluster.local:5432/orderdb' \
-            --from-literal=ORDER_DB_USER=order_svc --from-literal=ORDER_DB_PASS=order_pass \
+            --from-literal=ORDER_DB_USER="${{ secrets.ORDER_DB_USER }}" --from-literal=ORDER_DB_PASS="${{ secrets.ORDER_DB_PASS }}" \
             --from-literal=PRODUCT_DB_URL='jdbc:postgresql://postgres-product-0.postgres-product.ecommerce.svc.cluster.local:5432/productdb' \
-            --from-literal=PRODUCT_DB_USER=product_svc --from-literal=PRODUCT_DB_PASS=product_pass \
+            --from-literal=PRODUCT_DB_USER="${{ secrets.PRODUCT_DB_USER }}" --from-literal=PRODUCT_DB_PASS="${{ secrets.PRODUCT_DB_PASS }}" \
             --from-literal=INVENTORY_DB_URL='jdbc:postgresql://postgres-inventory-0.postgres-inventory.ecommerce.svc.cluster.local:5432/inventorydb' \
-            --from-literal=INVENTORY_DB_USER=inventory_svc --from-literal=INVENTORY_DB_PASS=inventory_pass \
+            --from-literal=INVENTORY_DB_USER="${{ secrets.INVENTORY_DB_USER }}" --from-literal=INVENTORY_DB_PASS="${{ secrets.INVENTORY_DB_PASS }}" \
             --from-literal=PAYMENT_DB_URL='jdbc:postgresql://postgres-payment-0.postgres-payment.ecommerce.svc.cluster.local:5432/paymentdb' \
-            --from-literal=PAYMENT_DB_USER=payment_svc --from-literal=PAYMENT_DB_PASS=payment_pass
+            --from-literal=PAYMENT_DB_USER="${{ secrets.PAYMENT_DB_USER }}" --from-literal=PAYMENT_DB_PASS="${{ secrets.PAYMENT_DB_PASS }}"
           kubectl apply -f k8s/services/configmap.yaml
 
       - name: Deploy data layer (Postgres, Redis, Kafka)

@@ -19,6 +19,8 @@ spring:
 aws:
   endpoint-url: http://${FLOCI_HOST:floci}:4566
   region: ${AWS_REGION:ap-south-1}
+  access-key-id: ${AWS_ACCESS_KEY_ID:test}
+  secret-access-key: ${AWS_SECRET_ACCESS_KEY:test}
 
 management:
   endpoints:

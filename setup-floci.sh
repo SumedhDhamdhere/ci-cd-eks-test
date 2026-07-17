@@ -10,6 +10,9 @@ docker compose up -d
 echo "Waiting 30s for services to start..."
 sleep 30
 
+# Load the same secrets docker-compose used, for the healthcheck steps below
+source .env
+
 # Step 2: Configure AWS CLI for Floci
 echo ""
 echo "Step 2: Configuring AWS CLI for Floci..."
@@ -37,7 +40,7 @@ docker exec kafka kafka-topics \
 # Step 5: Test Redis
 echo ""
 echo "Step 5: Testing Redis..."
-docker exec redis redis-cli -a redis_pass ping
+docker exec redis redis-cli -a "$REDIS_PASSWORD" ping
 
 # Step 6: Health check all services
 echo ""
