@@ -51,8 +51,9 @@ data:
     plugins:
       - name: rate-limiting
         config:
-          minute: 1000
-          hour: 50000
+          minute: 100
+          hour: 1000
+          limit_by: ip
           policy: local
       - name: correlation-id
         config:

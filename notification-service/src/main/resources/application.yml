@@ -10,6 +10,8 @@ spring:
       - org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP:kafka:9092}
+    admin:
+      fail-fast: false
     consumer:
       group-id: notification-service-group
       auto-offset-reset: earliest
@@ -27,6 +29,3 @@ management:
     web:
       exposure:
         include: health,info,metrics
-  kafka:
-    admin:
-      fail-fast: false

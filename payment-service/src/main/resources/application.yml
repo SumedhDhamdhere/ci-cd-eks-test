@@ -11,8 +11,12 @@ spring:
   jpa:
     hibernate:
       ddl-auto: validate
+  flyway:
+    connect-retries: 15
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP:kafka:9092}
+    admin:
+      fail-fast: false
     consumer:
       group-id: payment-service-group
       auto-offset-reset: earliest
@@ -27,8 +31,3 @@ management:
     web:
       exposure:
         include: health,info,metrics
-  flyway:
-    connect-retries: 15
-  kafka:
-    admin:
-      fail-fast: false

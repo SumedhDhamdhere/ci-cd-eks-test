@@ -19,6 +19,8 @@ spring:
       password: ${REDIS_PASSWORD}
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP:kafka:9092}
+  flyway:
+    connect-retries: 15
 
 jwt:
   secret: ${JWT_SECRET}
@@ -29,5 +31,3 @@ management:
     web:
       exposure:
         include: health,info,metrics
-  flyway:
-    connect-retries: 15
