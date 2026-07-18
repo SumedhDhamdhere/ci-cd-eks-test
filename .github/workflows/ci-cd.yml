@@ -179,6 +179,12 @@ jobs:
       - name: End-to-end smoke test (full saga → order PAID)
         run: bash .github/smoke-test.sh
 
+      - name: TEMP DEBUG - full untruncated user-service log grep
+        if: failure()
+        run: |
+          kubectl logs -l app=user-service -n ecommerce --all-containers --tail=-1 --previous 2>/dev/null | grep -i TEMPDEBUG || true
+          kubectl logs -l app=user-service -n ecommerce --all-containers --tail=-1 2>/dev/null | grep -i TEMPDEBUG || true
+
       - name: Dump logs on failure
         if: failure()
         run: |
