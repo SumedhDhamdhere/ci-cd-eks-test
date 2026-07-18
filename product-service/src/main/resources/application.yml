@@ -11,11 +11,6 @@ spring:
   jpa:
     hibernate:
       ddl-auto: validate
-  data:
-    redis:
-      host: ${REDIS_HOST:redis}
-      port: ${REDIS_PORT:6379}
-      password: ${REDIS_PASSWORD}
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP:kafka:9092}
   flyway:
