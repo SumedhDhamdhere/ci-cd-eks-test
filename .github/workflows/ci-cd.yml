@@ -156,6 +156,16 @@ jobs:
           kubectl wait --for=condition=ready pod -l app=kafka -n ecommerce --timeout=240s
           echo "✅ Data layer ready"
 
+      - name: TEMP DEBUG - compare redis password sources
+        run: |
+          SECRET_HASH=$(kubectl get secret app-secrets -n ecommerce -o jsonpath='{.data.REDIS_PASSWORD}' | base64 -d | sha256sum)
+          SECRET_LEN=$(kubectl get secret app-secrets -n ecommerce -o jsonpath='{.data.REDIS_PASSWORD}' | base64 -d | wc -c)
+          echo "K8s secret REDIS_PASSWORD sha256: $SECRET_HASH (raw byte length incl newline if any: $SECRET_LEN)"
+          echo "--- redis-cli auth using redis-0's OWN env var REDIS_PASSWORD ---"
+          kubectl exec redis-0 -n ecommerce -- sh -c 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning ping'
+          echo "--- redis-0 container env REDIS_PASSWORD (hash only) ---"
+          kubectl exec redis-0 -n ecommerce -- sh -c 'printenv REDIS_PASSWORD | sha256sum'
+
       - name: Deploy Kong gateway
         run: |
           kubectl apply -f k8s/kong/kong.yaml
@@ -165,6 +175,11 @@ jobs:
         run: |
           sed 's|REGISTRY|local|g; s|IMAGE_TAG|ci|g' \
             k8s/services/deployments.yaml | kubectl apply -f -
+          echo "--- TEMP DEBUG: waiting 20s for user-service pod to start, then hashing its env var ---"
+          sleep 20
+          POD=$(kubectl get pod -n ecommerce -l app=user-service -o jsonpath='{.items[0].metadata.name}')
+          echo "pod: $POD"
+          kubectl exec "$POD" -n ecommerce -- sh -c 'printenv SPRING_DATA_REDIS_PASSWORD | sha256sum' || echo "exec failed (pod may be crashlooping)"
           for svc in $SERVICES; do
             kubectl rollout status deployment/$svc -n ecommerce --timeout=300s
           done
