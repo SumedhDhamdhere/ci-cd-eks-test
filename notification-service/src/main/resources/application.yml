@@ -10,6 +10,8 @@ spring:
       - org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP:kafka:9092}
+    admin:
+      fail-fast: false
     consumer:
       group-id: notification-service-group
       auto-offset-reset: earliest
@@ -19,12 +21,11 @@ spring:
 aws:
   endpoint-url: http://${FLOCI_HOST:floci}:4566
   region: ${AWS_REGION:ap-south-1}
+  access-key-id: ${AWS_ACCESS_KEY_ID:test}
+  secret-access-key: ${AWS_SECRET_ACCESS_KEY:test}
 
 management:
   endpoints:
     web:
       exposure:
         include: health,info,metrics
-  kafka:
-    admin:
-      fail-fast: false

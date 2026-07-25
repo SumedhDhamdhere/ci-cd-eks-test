@@ -5,6 +5,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -18,6 +19,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final JwtConfig jwtConfig;
+    private final RedisTemplate<String, String> redisTemplate;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
@@ -27,10 +29,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             String token = header.substring(7);
             if (jwtConfig.isValid(token)) {
                 String email = jwtConfig.extractEmail(token);
-                String role = jwtConfig.extractRole(token);
-                var authToken = new UsernamePasswordAuthenticationToken(
-                        email, null, List.of(new SimpleGrantedAuthority("ROLE_" + role)));
-                SecurityContextHolder.getContext().setAuthentication(authToken);
+                // Session must still exist in Redis — this is what makes logout real:
+                // a logged-out token is rejected even though its signature is still valid.
+                if (Boolean.TRUE.equals(redisTemplate.hasKey("session:" + email))) {
+                    String role = jwtConfig.extractRole(token);
+                    var authToken = new UsernamePasswordAuthenticationToken(
+                            email, null, List.of(new SimpleGrantedAuthority("ROLE_" + role)));
+                    SecurityContextHolder.getContext().setAuthentication(authToken);
+                }
             }
         }
         filterChain.doFilter(request, response);

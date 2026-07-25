@@ -17,13 +17,21 @@ public class AwsConfig {
     @Value("${aws.region:ap-south-1}")
     private String region;
 
+    @Value("${aws.access-key-id:test}")
+    private String accessKeyId;
+
+    @Value("${aws.secret-access-key:test}")
+    private String secretAccessKey;
+
     @Bean
     public SesClient sesClient() {
         return SesClient.builder()
                 .region(Region.of(region))
-                .endpointOverride(URI.create(endpointUrl))  // Floci locally
+                .endpointOverride(URI.create(endpointUrl))  // Floci locally, real AWS in prod
                 .credentialsProvider(StaticCredentialsProvider.create(
-                    AwsBasicCredentials.create("test", "test")  // Floci accepts any creds
+                    AwsBasicCredentials.create(accessKeyId, secretAccessKey)
+                    // defaults to "test"/"test" — Floci accepts any creds; real AWS
+                    // deploys must set AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
                 ))
                 .build();
     }

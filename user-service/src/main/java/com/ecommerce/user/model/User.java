@@ -7,7 +7,8 @@ import java.time.LocalDateTime;
 @Table(name = "users")
 @Data @NoArgsConstructor @AllArgsConstructor @Builder
 public class User {
-    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Id @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "users_seq")
+    @SequenceGenerator(name = "users_seq", sequenceName = "users_seq", allocationSize = 50)
     private Long id;
     @Column(unique = true, nullable = false) private String email;
     @Column(nullable = false) private String password;

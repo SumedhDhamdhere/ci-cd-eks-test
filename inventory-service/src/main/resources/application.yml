@@ -6,31 +6,28 @@ spring:
     name: inventory-service
   datasource:
     url: jdbc:postgresql://${DB_HOST:postgres-inventory}:${DB_PORT:5432}/inventorydb
-    username: ${DB_USER:inventory_svc}
-    password: ${DB_PASSWORD:inventory_pass}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
   jpa:
     hibernate:
       ddl-auto: validate
+  flyway:
+    connect-retries: 15
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP:kafka:9092}
+    admin:
+      fail-fast: false
     consumer:
       group-id: inventory-service-group
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-  data:
-    redis:
-      host: ${REDIS_HOST:redis}
-      port: ${REDIS_PORT:6379}
-      password: ${REDIS_PASSWORD:redis_pass}
 
 management:
   endpoints:
     web:
       exposure:
         include: health,info,metrics
-  flyway:
-    connect-retries: 15
-  kafka:
-    admin:
-      fail-fast: false
+  health:
+    redis:
+      enabled: false

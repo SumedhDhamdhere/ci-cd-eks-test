@@ -115,8 +115,6 @@ spec:
           kafka-topics --bootstrap-server $BS --create --if-not-exists --topic order.created      --partitions 12 --replication-factor 1
           kafka-topics --bootstrap-server $BS --create --if-not-exists --topic payment.processed  --partitions 12 --replication-factor 1
           kafka-topics --bootstrap-server $BS --create --if-not-exists --topic inventory.updated  --partitions 6  --replication-factor 1
-          kafka-topics --bootstrap-server $BS --create --if-not-exists --topic order.confirmed    --partitions 6  --replication-factor 1
-          kafka-topics --bootstrap-server $BS --create --if-not-exists --topic notification.send  --partitions 4  --replication-factor 1
           kafka-topics --bootstrap-server $BS --create --if-not-exists --topic order.cancelled    --partitions 3  --replication-factor 1
           kafka-topics --bootstrap-server $BS --create --if-not-exists --topic product.created    --partitions 4  --replication-factor 1
           echo "✅ All topics created"

@@ -14,12 +14,8 @@ changing only environment variables.
 | I want to... | Go to |
 |---|---|
 | Run the app now | [Quick Start](#quick-start) |
-| Understand the architecture | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
-| Developer day-to-day workflow | [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) |
-| Deploy to Kubernetes via Floci | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) |
-| Understand autoscaling (HPA) | [docs/AUTOSCALING.md](docs/AUTOSCALING.md) |
-| Set up monitoring & logs | [docs/MONITORING.md](docs/MONITORING.md) |
-| CI/CD pipeline explained | [docs/CI_CD.md](docs/CI_CD.md) |
+| Architecture deep dive (all diagrams) | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| Full workflow: laptop → GitHub → CI → K8s → cloud | [docs/WORKFLOW.md](docs/WORKFLOW.md) |
 
 ---
 

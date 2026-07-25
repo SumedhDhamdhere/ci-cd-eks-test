@@ -6,27 +6,24 @@ spring:
     name: order-service
   datasource:
     url: jdbc:postgresql://${DB_HOST:postgres-order}:${DB_PORT:5432}/orderdb
-    username: ${DB_USER:order_svc}
-    password: ${DB_PASSWORD:order_pass}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
   jpa:
     hibernate:
       ddl-auto: validate
     show-sql: false
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP:kafka:9092}
-  data:
-    redis:
-      host: ${REDIS_HOST:redis}
-      port: ${REDIS_PORT:6379}
-      password: ${REDIS_PASSWORD:redis_pass}
+    admin:
+      fail-fast: false
+  flyway:
+    connect-retries: 15
 
 management:
   endpoints:
     web:
       exposure:
         include: health,info,metrics
-  flyway:
-    connect-retries: 15
-  kafka:
-    admin:
-      fail-fast: false
+  health:
+    redis:
+      enabled: false

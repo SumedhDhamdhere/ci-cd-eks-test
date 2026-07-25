@@ -1,15 +1,8 @@
 # ================================================================
 # PostgreSQL — DB per service pattern
 # Each service has its OWN database = independent deploy + scale
+# All credentials come from the app-secrets Secret (see k8s/services/secrets.example.yaml)
 # ================================================================
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: postgres-config
-  namespace: ecommerce
-data:
-  POSTGRES_PASSWORD: "postgres123"
----
 # USER DB
 apiVersion: apps/v1
 kind: StatefulSet
@@ -36,9 +29,15 @@ spec:
         - name: POSTGRES_DB
           value: userdb
         - name: POSTGRES_USER
-          value: user_svc
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: USER_DB_USER
         - name: POSTGRES_PASSWORD
-          value: user_pass
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: USER_DB_PASS
         volumeMounts:
         - name: data
           mountPath: /var/lib/postgresql/data
@@ -96,9 +95,15 @@ spec:
         - name: POSTGRES_DB
           value: orderdb
         - name: POSTGRES_USER
-          value: order_svc
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: ORDER_DB_USER
         - name: POSTGRES_PASSWORD
-          value: order_pass
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: ORDER_DB_PASS
         volumeMounts:
         - name: data
           mountPath: /var/lib/postgresql/data
@@ -156,9 +161,15 @@ spec:
         - name: POSTGRES_DB
           value: paymentdb
         - name: POSTGRES_USER
-          value: payment_svc
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: PAYMENT_DB_USER
         - name: POSTGRES_PASSWORD
-          value: payment_pass
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: PAYMENT_DB_PASS
         volumeMounts:
         - name: data
           mountPath: /var/lib/postgresql/data
@@ -214,9 +225,15 @@ spec:
         - name: POSTGRES_DB
           value: productdb
         - name: POSTGRES_USER
-          value: product_svc
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: PRODUCT_DB_USER
         - name: POSTGRES_PASSWORD
-          value: product_pass
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: PRODUCT_DB_PASS
         volumeMounts:
         - name: data
           mountPath: /var/lib/postgresql/data
@@ -265,9 +282,15 @@ spec:
         - name: POSTGRES_DB
           value: inventorydb
         - name: POSTGRES_USER
-          value: inventory_svc
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: INVENTORY_DB_USER
         - name: POSTGRES_PASSWORD
-          value: inventory_pass
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: INVENTORY_DB_PASS
         volumeMounts:
         - name: data
           mountPath: /var/lib/postgresql/data

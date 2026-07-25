@@ -8,7 +8,7 @@ import java.util.Date;
 
 @Component
 public class JwtConfig {
-    @Value("${jwt.secret:mySecretKey123456789012345678901234567890}")
+    @Value("${jwt.secret}")
     private String secret;
     @Value("${jwt.expiration:86400000}")
     private long expiration;
