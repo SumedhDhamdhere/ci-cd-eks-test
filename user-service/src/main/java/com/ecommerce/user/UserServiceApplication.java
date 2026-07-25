@@ -5,6 +5,7 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Bean;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
 import java.security.MessageDigest;
 @SpringBootApplication
 public class UserServiceApplication {
@@ -25,6 +26,23 @@ public class UserServiceApplication {
                 System.out.println("TEMPDEBUG System.getenv(SPRING_DATA_REDIS_HOST)=[" + System.getenv("SPRING_DATA_REDIS_HOST") + "]");
             } catch (Exception e) {
                 System.out.println("TEMPDEBUG error: " + e);
+            }
+            try {
+                RedisConnectionFactory rcf = ctx.getBean(RedisConnectionFactory.class);
+                System.out.println("TEMPDEBUG RedisConnectionFactory class=[" + rcf.getClass().getName() + "]");
+                var conn = rcf.getConnection();
+                String pong = conn.ping();
+                System.out.println("TEMPDEBUG direct redis ping SUCCESS pong=[" + pong + "]");
+                conn.close();
+            } catch (Throwable t) {
+                System.out.println("TEMPDEBUG direct redis ping FAILED: " + t.getClass().getName() + ": " + t.getMessage());
+                Throwable cause = t.getCause();
+                int depth = 0;
+                while (cause != null && depth < 6) {
+                    System.out.println("TEMPDEBUG   caused by: " + cause.getClass().getName() + ": " + cause.getMessage());
+                    cause = cause.getCause();
+                    depth++;
+                }
             }
         };
     }
