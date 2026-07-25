@@ -160,8 +160,13 @@ jobs:
         run: |
           echo "--- current app-secrets REDIS_PASSWORD (hash) ---"
           kubectl get secret app-secrets -n ecommerce -o jsonpath='{.data.REDIS_PASSWORD}' | base64 -d | sha256sum
-          echo "--- redis-0's own printenv REDIS_PASSWORD (hash) ---"
+          echo "--- redis-0's own printenv REDIS_PASSWORD (hash, WITH trailing newline from printenv) ---"
           kubectl exec redis-0 -n ecommerce -- sh -c 'printenv REDIS_PASSWORD | sha256sum'
+          echo "--- redis-0's own env REDIS_PASSWORD (hash, NO trailing newline, printf -n style) ---"
+          kubectl exec redis-0 -n ecommerce -- sh -c 'printf "%s" "$REDIS_PASSWORD" | sha256sum'
+          echo "--- live AUTH test: redis-cli using the K8s secret's CURRENT value directly (fresh kubectl extraction, not redis-0's own env) ---"
+          CURRENT_PW=$(kubectl get secret app-secrets -n ecommerce -o jsonpath='{.data.REDIS_PASSWORD}' | base64 -d)
+          kubectl exec redis-0 -n ecommerce -- redis-cli -a "$CURRENT_PW" --no-auth-warning ping || echo "AUTH FAILED with current secret value"
           echo "--- redis pod spec env (from live cluster, to check for a stale/duplicate secret object) ---"
           kubectl get pod -l app=redis -n ecommerce -o jsonpath='{.items[0].spec.containers[0].command}'
           echo ""
