@@ -21,6 +21,8 @@ public class UserServiceApplication {
                 String envVar = System.getenv("SPRING_DATA_REDIS_PASSWORD");
                 System.out.println("TEMPDEBUG spring.data.redis.password resolved=[" + hash(resolved) + "] length=" + (resolved == null ? "null" : resolved.length()));
                 System.out.println("TEMPDEBUG System.getenv(SPRING_DATA_REDIS_PASSWORD)=[" + hash(envVar) + "] length=" + (envVar == null ? "null" : envVar.length()));
+                System.out.println("TEMPDEBUG spring.data.redis.host resolved=[" + ctx.getEnvironment().getProperty("spring.data.redis.host") + "]");
+                System.out.println("TEMPDEBUG System.getenv(SPRING_DATA_REDIS_HOST)=[" + System.getenv("SPRING_DATA_REDIS_HOST") + "]");
             } catch (Exception e) {
                 System.out.println("TEMPDEBUG error: " + e);
             }
