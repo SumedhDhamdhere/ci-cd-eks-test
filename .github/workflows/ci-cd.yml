@@ -156,6 +156,23 @@ jobs:
           kubectl wait --for=condition=ready pod -l app=kafka -n ecommerce --timeout=240s
           echo "✅ Data layer ready"
 
+      - name: TEMP DEBUG - redis vs secret hash, same moment
+        run: |
+          echo "--- current app-secrets REDIS_PASSWORD (hash) ---"
+          kubectl get secret app-secrets -n ecommerce -o jsonpath='{.data.REDIS_PASSWORD}' | base64 -d | sha256sum
+          echo "--- redis-0's own printenv REDIS_PASSWORD (hash) ---"
+          kubectl exec redis-0 -n ecommerce -- sh -c 'printenv REDIS_PASSWORD | sha256sum'
+          echo "--- redis pod spec env (from live cluster, to check for a stale/duplicate secret object) ---"
+          kubectl get pod -l app=redis -n ecommerce -o jsonpath='{.items[0].spec.containers[0].command}'
+          echo ""
+          echo "--- how many app-secrets Secret objects exist in namespace? ---"
+          kubectl get secrets -n ecommerce
+          echo "--- redis-0 pod start time vs secret creation time ---"
+          kubectl get pod redis-0 -n ecommerce -o jsonpath='{.status.startTime}'
+          echo ""
+          kubectl get secret app-secrets -n ecommerce -o jsonpath='{.metadata.creationTimestamp}'
+          echo ""
+
       - name: Deploy Kong gateway
         run: |
           kubectl apply -f k8s/kong/kong.yaml
