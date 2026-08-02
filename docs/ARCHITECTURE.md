@@ -26,7 +26,7 @@ flowchart TB
 
     U -.sessions.- R[(Redis)]
     P -.cache 15m TTL.- R
-    I -.distributed lock.- R
+    I -.reservation tracking.- R
 
     O <-->|events| K[(Kafka)]
     I <-->|events| K
@@ -37,7 +37,8 @@ flowchart TB
 ```
 
 - **DB-per-service** — no shared tables; each service owns its schema (Flyway migrations run on startup).
-- **Redis, 3 distinct jobs** — JWT session store (real logout), product cache, inventory distributed lock (oversell prevention).
+- **Redis, 3 distinct jobs** — JWT session store (logout, enforced at user-service only), product cache, and per-order reservation tracking for inventory.
+  The oversell guard is *not* the Redis lock it used to be: that lock was released in a `finally` block while the method was still `@Transactional`, so it was gone before the write committed and 40 concurrent orders sold 18 units out of 10. It is now a single conditional `UPDATE ... WHERE quantity - reserved >= :qty`.
 
 ---
 
@@ -57,15 +58,17 @@ sequenceDiagram
 
     C->>O: POST /orders
     O->>O: save order (PENDING)
-    O->>K: order.created
+    O->>O: COMMIT
+    O->>K: order.created (after commit — see note)
     K->>I: order.created
-    I->>I: Redis lock → reserve stock
+    I->>I: atomic conditional UPDATE → reserve stock
     I->>K: inventory.updated (ok/fail)
     K->>O: inventory.updated
     K->>P: inventory.updated
     alt stock reserved
         P->>K: payment.processed (ok/fail)
-        K->>O: payment.processed → CONFIRMED / CANCELLED
+        K->>O: payment.processed → PAID / CANCELLED
+        K->>I: payment.processed → deduct or release stock
     else out of stock
         O->>O: mark CANCELLED
         O->>K: order.cancelled (compensation)
@@ -78,30 +81,70 @@ sequenceDiagram
 **5 topics:** `order.created` · `inventory.updated` · `payment.processed` · `order.cancelled` · `product.created`
 One consumer group per service; 3–6 concurrent listeners per topic for throughput.
 
+**Why the diagram shows COMMIT before the publish.** order-service used to send
+`order.created` from inside the `@Transactional` method. The Kafka send goes out
+immediately; the commit happens when the method returns. Under a 20-order burst
+inventory-service replied within milliseconds — before the order row was visible
+to anyone else — and order-service's reply handler looked the order up, found
+nothing, and returned without a word. Measured on a live cluster: 21 orders, 21
+`order.created`, 21 `inventory.updated` replies, consumer lag 0, and **4 orders
+stranded at PENDING with no log line at all**. Events now go out on
+`AFTER_COMMIT`, so a reply cannot arrive before the order exists.
+
+If the process dies between the commit and the send, the event is still lost —
+that residual gap is covered by a stale-order reaper rather than by a
+transactional outbox, so a lost event degrades to a cancelled order rather than
+a stuck one.
+
 ---
 
-## 3. Auth Flow (JWT + Redis sessions)
+## 3. Auth Flow (JWT per service, Redis sessions at user-service)
 
 ```mermaid
 sequenceDiagram
     participant C as Client
     participant U as user-service
     participant R as Redis
-    participant S as any service
+    participant S as any other service
 
     C->>U: POST /login
-    U->>R: store session (jti)
-    U-->>C: JWT
+    U->>R: store session
+    U-->>C: JWT (sub, userId, role)
     C->>S: request + JWT
-    S->>R: session still valid?
-    alt logged out
-        S-->>C: 401
+    S->>S: verify signature with the shared secret
+    alt invalid or missing
+        S-->>C: 403
     else valid
         S-->>C: 200
     end
+    C->>U: request + JWT
+    U->>R: session still present?
+    alt logged out
+        U-->>C: 403
+    else valid
+        U-->>C: 200
+    end
 ```
 
-Logout deletes the Redis session → token dead instantly, even before its expiry.
+Each service verifies the signature itself rather than trusting the gateway —
+Kong is not the only route to a pod, since `kubectl port-forward` goes straight
+past it. The token carries a **userId** claim, which is what lets order-service
+identify the caller without reading a user id out of the request body.
+
+**Two things this diagram deliberately shows, because both used to be described
+wrongly here:**
+
+1. Until the authorisation work, five of the six services had no security
+   configuration at all. `POST /api/orders` with no `Authorization` header
+   returned **200**. An earlier version of this diagram showed *every* service
+   asking Redis whether the session was valid; no service except user-service
+   ever did that.
+
+2. **Logout is still only enforced at user-service.** It deletes the Redis
+   session, so user-service rejects the token immediately — but the other five
+   verify the signature and expiry only, and will keep accepting that token
+   until it expires (24h). Closing that needs either a shared revocation check
+   or short-lived tokens with refresh. It is a known gap, not a solved problem.
 
 ---
 
@@ -114,7 +157,7 @@ flowchart LR
         ALB --> KONG[Kong]
         KONG --> SVC[6 service Deployments + HPA]
     end
-    subgraph DATA[data subnet]
+    subgraph DATA[private subnets — see note]
         PG[(Postgres ×5)]
         RD[(Redis)]
         KF[(Kafka)]
@@ -123,7 +166,14 @@ flowchart LR
     ECR[(ECR — image per service,<br/>tag = git SHA)] --> SVC
 ```
 
-- 3-tier network: **public** (ALB only) → **private** (EKS nodes, Kong, services) → **data** (DBs, Kafka, Redis). Security groups enforce each hop.
+- **This is a 2-tier deployment, not 3.** `scripts/01-vpc.sh` creates data subnets
+  and a `db-sg`, but nothing uses them: Postgres, Redis and Kafka are StatefulSets,
+  so they run as pods on the EKS nodes in the **private** subnets, and `db-sg` is
+  never attached to anything. Isolation is enforced in Kubernetes instead — see
+  `k8s/security/networkpolicy.yaml`, which is *stricter* than `db-sg` would have
+  been: `db-sg` let any pod carrying `eks-sg` reach any database on 5432, whereas
+  the policies allow only order-service → postgres-order, and so on. Security
+  groups filter per-ENI and cannot express per-pod rules.
 - 2 EKS node groups: `general` (m5.large — most services, Kong) and `high-mem` (r5.large — Kafka consumers).
 - Manifests in [k8s/](../k8s/): `namespace/ postgres/ redis/ kafka/ kong/ services/ monitoring/`. Same manifests work on real AWS — only env vars change.
 
@@ -150,6 +200,6 @@ flowchart LR
 | user | 8081 | users, auth | — | — | JWT + Redis sessions |
 | product | 8082 | catalog | `product.created` | — | Redis cache 15-min TTL |
 | order | 8083 | orders, saga state | `order.created`, `order.cancelled` | `inventory.updated`, `payment.processed` | Saga initiator |
-| inventory | 8084 | stock | `inventory.updated` | `order.created`, `order.cancelled`, `product.created` | Redis lock — no oversell |
+| inventory | 8084 | stock | `inventory.updated` | `order.created`, `order.cancelled`, `payment.processed`, `product.created` | Atomic conditional UPDATE — no oversell |
 | payment | 8085 | payments | `payment.processed` | `inventory.updated` | Pays only after stock reserved |
 | notification | 8086 | — (stateless) | — | `order.created`, `payment.processed`, `order.cancelled` | SES email |
