@@ -62,7 +62,7 @@ class UserServiceTest {
 
         when(userRepository.existsByEmail("jane@example.com")).thenReturn(false);
         when(passwordEncoder.encode("password123")).thenReturn("hashed");
-        when(jwtConfig.generateToken(eq("jane@example.com"), anyString())).thenReturn("token123");
+        when(jwtConfig.generateToken(any(), eq("jane@example.com"), anyString())).thenReturn("token123");
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
 
@@ -109,7 +109,7 @@ class UserServiceTest {
 
         when(userRepository.findByEmail("jane@example.com")).thenReturn(Optional.of(user));
         when(passwordEncoder.matches("password123", "hashed")).thenReturn(true);
-        when(jwtConfig.generateToken(eq("jane@example.com"), anyString())).thenReturn("token456");
+        when(jwtConfig.generateToken(any(), eq("jane@example.com"), anyString())).thenReturn("token456");
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
 
         AuthResponse response = userService.login(req);

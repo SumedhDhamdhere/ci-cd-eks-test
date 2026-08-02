@@ -15,6 +15,21 @@ spring:
     connect-retries: 15
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP:kafka:9092}
+    producer:
+      # Defaults were acks=1 with no idempotence, which is why a Kafka broker
+      # restart during a load test left 12 of 40 orders stuck at PENDING: the
+      # leader acknowledged writes it had not replicated, then lost them during
+      # the election. acks=all will not acknowledge until every in-sync replica
+      # has the record.
+      acks: all
+      retries: 10
+      properties:
+        enable.idempotence: true          # no duplicates when a retry succeeds twice
+        max.in.flight.requests.per.connection: 5
+        delivery.timeout.ms: 120000
+        request.timeout.ms: 30000
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
     admin:
       fail-fast: false
     consumer:
@@ -31,3 +46,7 @@ management:
   health:
     redis:
       enabled: false
+
+# Shared with user-service, which mints the tokens this service verifies.
+jwt:
+  secret: ${JWT_SECRET}

@@ -26,7 +26,7 @@ public class UserService {
                 .password(passwordEncoder.encode(req.getPassword()))
                 .phone(req.getPhone()).build();
         userRepository.save(user);
-        String token = jwtConfig.generateToken(user.getEmail(), user.getRole().name());
+        String token = jwtConfig.generateToken(user.getId(), user.getEmail(), user.getRole().name());
         redisTemplate.opsForValue().set(SESSION_PREFIX + user.getEmail(), token, 24, TimeUnit.HOURS);
         log.info("User registered: {}", user.getEmail());
         return AuthResponse.builder().token(token).email(user.getEmail())
@@ -38,7 +38,7 @@ public class UserService {
                 .orElseThrow(() -> new RuntimeException("Invalid credentials"));
         if (!passwordEncoder.matches(req.getPassword(), user.getPassword()))
             throw new RuntimeException("Invalid credentials");
-        String token = jwtConfig.generateToken(user.getEmail(), user.getRole().name());
+        String token = jwtConfig.generateToken(user.getId(), user.getEmail(), user.getRole().name());
         redisTemplate.opsForValue().set(SESSION_PREFIX + user.getEmail(), token, 24, TimeUnit.HOURS);
         log.info("User logged in: {}", user.getEmail());
         return AuthResponse.builder().token(token).email(user.getEmail())

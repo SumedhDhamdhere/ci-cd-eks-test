@@ -5,7 +5,9 @@ import java.util.List;
 
 @Data
 public class CreateOrderRequest {
-    @NotNull private Long userId;
+    // There is deliberately no userId field. It used to be required, and because
+    // the service trusted it, any caller could book an order in another user's
+    // name. The owner now comes from the verified JWT.
     @NotEmpty private List<OrderItemRequest> items;
     @NotBlank private String shippingAddress;
 

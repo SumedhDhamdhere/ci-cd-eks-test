@@ -8,6 +8,19 @@ import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    // Typed handlers first. Matching on message text (below) is fragile — a
+    // reworded message silently changes the status code.
+    @ExceptionHandler(OrderNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleNotFound(OrderNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", ex.getMessage()));
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<Map<String, String>> handleAccessDenied(AccessDeniedException ex) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", ex.getMessage()));
+    }
+
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<Map<String, String>> handleRuntimeException(RuntimeException ex) {
         String message = ex.getMessage() == null ? "" : ex.getMessage();

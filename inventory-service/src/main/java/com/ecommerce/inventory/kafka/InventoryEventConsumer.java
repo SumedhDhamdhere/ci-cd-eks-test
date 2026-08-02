@@ -79,13 +79,46 @@ public class InventoryEventConsumer {
             JsonNode event = objectMapper.readTree(message);
             Long orderId = event.get("orderId").asLong();
             log.info("Received order.cancelled, releasing stock for orderId={}", orderId);
-            for (JsonNode item : event.get("items")) {
-                Long productId = item.get("productId").asLong();
-                Integer quantity = item.get("quantity").asInt();
-                inventoryService.releaseStock(productId, quantity);
-            }
+            // Release by orderId rather than replaying the event's items — the
+            // tracked reservation is the source of truth for what was actually
+            // taken, and doing it this way is idempotent on redelivery.
+            inventoryService.releaseOrder(orderId);
         } catch (Exception e) {
             log.error("Error processing order.cancelled event: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Consumes payment.processed — the step that was missing entirely.
+     *
+     * Without it the saga reserved stock and then never did anything with it:
+     * confirmStock() existed but was only ever called from a unit test, so
+     * `quantity` was never decremented. A load test showed 18 paid orders leaving
+     * stock at its original value of 10.
+     *
+     * The event carries only orderId/userId/amount/success — no items — so we
+     * look up what this order reserved instead of trusting the event to say.
+     */
+    @KafkaListener(
+        topics = "payment.processed",
+        groupId = "inventory-service-group",
+        concurrency = "6"
+    )
+    public void handlePaymentProcessed(String message) {
+        try {
+            JsonNode event = objectMapper.readTree(message);
+            Long orderId = event.get("orderId").asLong();
+            boolean success = event.get("success").asBoolean();
+
+            if (success) {
+                log.info("Payment succeeded for orderId={} — deducting reserved stock", orderId);
+                inventoryService.confirmOrder(orderId);
+            } else {
+                log.info("Payment failed for orderId={} — releasing reserved stock", orderId);
+                inventoryService.releaseOrder(orderId);
+            }
+        } catch (Exception e) {
+            log.error("Error processing payment.processed event: {}", e.getMessage());
         }
     }
 }
