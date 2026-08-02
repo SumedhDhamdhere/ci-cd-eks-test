@@ -30,10 +30,28 @@ spec:
       labels:
         app: redis
     spec:
+      automountServiceAccountToken: false
+      # The redis image's entrypoint normally drops to the `redis` user (999),
+      # but the explicit `command:` below replaces that entrypoint, so the drop
+      # never happened and redis-server ran as root — confirmed with
+      # `ps -o user -p 1` inside the pod. Setting it here restores it.
+      # fsGroup makes the kubelet chown the /data volume so redis can still
+      # write its snapshot after the uid change.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
       containers:
       - name: redis
         image: redis:7-alpine
         command: ["redis-server", "/etc/redis/redis.conf", "--requirepass", "$(REDIS_PASSWORD)"]
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
         env:
         - name: REDIS_PASSWORD
           valueFrom:

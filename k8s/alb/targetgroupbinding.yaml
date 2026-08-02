@@ -1,0 +1,71 @@
+# ================================================================
+# TargetGroupBinding — keeps the ALB target group in sync with Kong
+#
+# WHY THIS EXISTS
+#   The ALB, target group and listeners are created by scripts/02-alb.sh
+#   (we keep ownership of them). What was missing was *keeping the target
+#   group up to date*.
+#
+#   05-deploy.sh used to snapshot Kong's pod IPs once with
+#   `aws elbv2 register-targets`. That is correct exactly until the first
+#   pod restart — then the registered IP is dead, the new pod is unknown
+#   to the ALB, and clients get 503s.
+#
+#   This object hands that one job to the AWS Load Balancer Controller:
+#   it watches the Endpoints of the kong-proxy Service and registers /
+#   deregisters pod IPs in the target group continuously.
+#
+# WHAT IT DOES NOT DO
+#   It does not create or manage the ALB, listeners or rules — those stay
+#   under our control in 02-alb.sh. Only target membership is delegated.
+#
+# PREREQUISITES
+#   1. AWS Load Balancer Controller installed in kube-system
+#      (it provides this CRD — without it, `kubectl apply` fails with
+#       "no matches for kind TargetGroupBinding")
+#   2. TG_ARN below replaced with the real ARN from scripts/.env
+#   3. The target group must be target-type: ip  (02-alb.sh already sets this)
+# ================================================================
+apiVersion: elbv2.k8s.aws/v1beta1
+kind: TargetGroupBinding
+metadata:
+  name: kong-proxy-tgb
+  namespace: ecommerce
+spec:
+  # Which Kubernetes Service's pods should end up in the target group.
+  # The controller resolves this to pod IPs via the Service's EndpointSlice,
+  # and only Ready pods are registered.
+  serviceRef:
+    name: kong-proxy
+    # The SERVICE port, not the container port. kong-proxy publishes 80 and 443
+    # and forwards both to targetPort 8000, so 80 belongs here — the controller
+    # walks the Service down to the pods itself.
+    #
+    # This was 8000, the container port, which does not exist on the Service.
+    # The object was still accepted and the controller even reported
+    # "Successfully reconciled", but next to it sat:
+    #   Warning  BackendNotFound  unable to find port 8000 on service
+    #                             ecommerce/kong-proxy
+    # and the target group stayed empty — the exact failure this file exists to
+    # prevent. Only caught by registering it against a real ALB and looking.
+    port: 80
+
+  # The target group created by scripts/02-alb.sh.
+  # Replaced at deploy time by 05-deploy.sh using $TG_ARN from .env.
+  targetGroupARN: TG_ARN_PLACEHOLDER
+
+  # ip  → ALB talks directly to pod IPs (requires the AWS VPC CNI, which
+  #       EKS uses by default, so pods hold real VPC addresses)
+  # instance → would target node IPs + NodePort instead
+  targetType: ip
+
+  # Allow the controller to manage the security group rules that let the
+  # ALB reach the pods on 8000.
+  networking:
+    ingress:
+      - from:
+          - securityGroup:
+              groupID: ALB_SG_PLACEHOLDER
+        ports:
+          - protocol: TCP
+            port: 8000

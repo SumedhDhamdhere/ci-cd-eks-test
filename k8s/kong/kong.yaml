@@ -42,19 +42,27 @@ data:
           - name: payment-routes
             paths: [/api/payments]
             strip_path: false
-      - name: notification-service
-        url: http://notification-service.ecommerce.svc.cluster.local:8086
-        routes:
-          - name: notification-routes
-            paths: [/api/notifications]
-            strip_path: false
+      # notification-service is deliberately not routed. It has no controller
+      # and no HTTP API at all — it is a pure Kafka consumer — so the route only
+      # ever returned 404 while advertising the service as public attack surface.
     plugins:
       - name: rate-limiting
         config:
           minute: 100
           hour: 1000
           limit_by: ip
-          policy: local
+          # policy: local keeps the counter in each Kong pod's own memory. With
+          # kong-hpa scaling to 3 replicas that silently turns a 100/min limit
+          # into 300/min, because the same client is counted separately by each
+          # gateway pod. A shared Redis counter is the only way the number means
+          # what it says once there is more than one Kong replica.
+          policy: redis
+          redis_host: redis
+          redis_port: 6379
+          # Resolved at runtime from the REDIS_PASSWORD env var, so the password
+          # never lands in this ConfigMap.
+          redis_password: "{vault://env/redis-password}"
+          redis_timeout: 2000
       - name: correlation-id
         config:
           header_name: X-Request-ID
@@ -83,12 +91,15 @@ spec:
         prometheus.io/port: "8001"
         prometheus.io/path: "/metrics"
     spec:
+      terminationGracePeriodSeconds: 45
+      automountServiceAccountToken: false
       containers:
       - name: kong
         image: kong:3.4
         ports:
         - containerPort: 8000  # Proxy (client traffic)
-        - containerPort: 8001  # Admin API
+        # 8001 is deliberately NOT declared as a containerPort and is bound to
+        # loopback below — see KONG_ADMIN_LISTEN.
         env:
         - name: KONG_DATABASE
           value: "off"
@@ -100,19 +111,42 @@ spec:
           value: /dev/stdout
         - name: KONG_PROXY_ERROR_LOG
           value: /dev/stderr
+        # The Admin API can create routes, delete routes and disable plugins —
+        # it is full control of the gateway, and it has no authentication.
+        # It was bound to 0.0.0.0 with a ClusterIP Service in front of it, so
+        # any pod in the namespace could reconfigure the gateway. NetworkPolicy
+        # blocks that here, but on EKS the VPC CNI does NOT enforce
+        # NetworkPolicy unless the policy agent is switched on, so this must not
+        # be the only control. Bound to loopback: `kubectl port-forward` still
+        # reaches it (port-forward enters the pod's network namespace), which is
+        # the only access path an operator actually needs.
         - name: KONG_ADMIN_LISTEN
-          value: "0.0.0.0:8001"
+          value: "127.0.0.1:8001"
         - name: KONG_STATUS_LISTEN
           value: "0.0.0.0:8100"
+        # Consumed by the rate-limiting plugin's {vault://env/redis-password}.
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: REDIS_PASSWORD
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        lifecycle:
+          preStop:
+            exec:
+              command: ["sh","-c","sleep 10"]
         volumeMounts:
         - name: kong-config
           mountPath: /kong/declarative
         resources:
           requests:
-            memory: "256Mi"
+            memory: "512Mi"
             cpu: "250m"
           limits:
-            memory: "512Mi"
+            memory: "1Gi"
             cpu: "500m"
         livenessProbe:
           httpGet:
@@ -131,17 +165,29 @@ spec:
         configMap:
           name: kong-config
 ---
-# External LoadBalancer — this becomes the ALB on AWS
+# The ALB's backend. Deliberately ClusterIP, not LoadBalancer.
+#
+# This used to be `type: LoadBalancer` with
+# `service.beta.kubernetes.io/aws-load-balancer-type: "alb"`, which does not do
+# what it looks like it does. An ALB is never created from a Service — it comes
+# from an Ingress, or from the CLI as scripts/02-alb.sh does here. "alb" is not
+# a value the Service annotation recognises, so on EKS this would have quietly
+# provisioned a *second*, Classic load balancer next to the ALB the scripts
+# already build: another billed resource, another public endpoint, and a
+# confusing one to debug because both would answer.
+#
+# The real path is: 02-alb.sh creates the ALB, target group and listeners, and
+# k8s/alb/targetgroupbinding.yaml points the AWS Load Balancer Controller at
+# this Service so it keeps the target group's pod IPs in sync. That needs
+# nothing more than a ClusterIP here — the controller reads the EndpointSlice,
+# not the Service's own load balancer.
 apiVersion: v1
 kind: Service
 metadata:
   name: kong-proxy
   namespace: ecommerce
-  annotations:
-    service.beta.kubernetes.io/aws-load-balancer-type: "alb"
-    service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
 spec:
-  type: LoadBalancer
+  type: ClusterIP
   selector:
     app: kong
   ports:
@@ -152,19 +198,11 @@ spec:
     port: 443
     targetPort: 8000
 ---
-# Internal service for admin API
-apiVersion: v1
-kind: Service
-metadata:
-  name: kong-admin
-  namespace: ecommerce
-spec:
-  selector:
-    app: kong
-  ports:
-  - port: 8001
-    targetPort: 8001
----
+# The kong-admin Service used to publish the unauthenticated Admin API on
+# 8001 to the whole namespace. It is deliberately gone: the API is now bound
+# to loopback, so reach it with
+#     kubectl -n ecommerce port-forward deploy/kong 8001:8001
+# which enters the pod's network namespace and needs no Service.
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -175,7 +213,10 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: kong
-  minReplicas: 1
+  # 2, not 1: Kong is the only ingress path. At one replica any restart,
+  # eviction or node drain takes the entire API offline, and a PodDisruptionBudget
+  # cannot protect a single replica without deadlocking drains altogether.
+  minReplicas: 2
   maxReplicas: 3
   metrics:
   - type: Resource

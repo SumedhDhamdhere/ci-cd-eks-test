@@ -1,34 +1,56 @@
-# ================================================================
-# Microservice Deployments
-# Each service:
-#   - 2 replicas (HA — if one pod dies, other handles traffic)
-#   - resource limits (prevent one service starving others)
-#   - liveness probe (K8s restarts if unhealthy)
-#   - readiness probe (K8s stops traffic until ready)
-#   - HPA = auto-scale based on CPU
-# ================================================================
 
 # ── USER SERVICE ──────────────────────────────────
 apiVersion: apps/v1
-kind: Deployment
+kind: Deployment # even if this pod dies, the other pod will handle traffic it is not so important so this is deployment not statefulset
 metadata:
-  name: user-service
-  namespace: ecommerce
+  name: user-service # this is the name of the deployment
+  namespace: ecommerce # this is the namespace where the deployment will be created
 spec:
-  replicas: 1
+  replicas: 1 
   selector:
     matchLabels:
-      app: user-service
-  template:
+      app: user-service  #if this does not match with template labels, the deployment will create a new pod with the same template label but then think min replica is one so it will create infinite pods as this line is for managing no of pods in deployment registry
+  template: #blueprint for the pod 
     metadata:
       labels:
-        app: user-service
+        app: user-service  #put this label in the pod so that deployment can manage the pod
     spec:
+      # Give kube-proxy time to remove this pod from the Service endpoints
+      # before the JVM stops accepting. Chaos test showed a 502 + five 5s
+      # timeouts on every pod kill without this.
+      terminationGracePeriodSeconds: 45
+      # None of these services call the Kubernetes API, so they must not carry
+      # a token that a compromised container could replay.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+      - name: tmp
+        emptyDir: {}
       containers:
-      - name: user-service
-        image: REGISTRY/ecommerce/user-service:IMAGE_TAG
+      - name: user-service #this is the name of the container 
+        image: REGISTRY/ecommerce/user-service:IMAGE_TAG #from where it will pull the image, REGISTRY is the docker registry where the image is stored, IMAGE_TAG is the tag of the image
         ports:
-        - containerPort: 8081
+        - containerPort: 8081 #this is the port on which the container will listen for incoming traffic
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: tmp          # the only path the JVM needs to write
+          mountPath: /tmp
+        lifecycle:
+          preStop:
+            exec:
+              # Endpoint removal is asynchronous. Sleep so in-flight requests
+              # drain instead of hitting a socket that is already closing.
+              command: ["sh","-c","sleep 10"]
         env:
         - name: SPRING_DATASOURCE_URL
           valueFrom:
@@ -130,12 +152,51 @@ spec:
       labels:
         app: product-service
     spec:
+      # Give kube-proxy time to remove this pod from the Service endpoints
+      # before the JVM stops accepting. Chaos test showed a 502 + five 5s
+      # timeouts on every pod kill without this.
+      terminationGracePeriodSeconds: 45
+      # None of these services call the Kubernetes API, so they must not carry
+      # a token that a compromised container could replay.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+      - name: tmp
+        emptyDir: {}
       containers:
       - name: product-service
         image: REGISTRY/ecommerce/product-service:IMAGE_TAG
         ports:
         - containerPort: 8082
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: tmp          # the only path the JVM needs to write
+          mountPath: /tmp
+        lifecycle:
+          preStop:
+            exec:
+              # Endpoint removal is asynchronous. Sleep so in-flight requests
+              # drain instead of hitting a socket that is already closing.
+              command: ["sh","-c","sleep 10"]
         env:
+        # These services verify tokens minted by user-service, so they need the
+        # same signing key. Without it they had no way to authenticate anyone —
+        # every endpoint answered anonymous callers.
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: JWT_SECRET
         - name: SPRING_DATASOURCE_URL
           valueFrom:
             secretKeyRef:
@@ -210,12 +271,51 @@ spec:
       labels:
         app: order-service
     spec:
+      # Give kube-proxy time to remove this pod from the Service endpoints
+      # before the JVM stops accepting. Chaos test showed a 502 + five 5s
+      # timeouts on every pod kill without this.
+      terminationGracePeriodSeconds: 45
+      # None of these services call the Kubernetes API, so they must not carry
+      # a token that a compromised container could replay.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+      - name: tmp
+        emptyDir: {}
       containers:
       - name: order-service
         image: REGISTRY/ecommerce/order-service:IMAGE_TAG
         ports:
         - containerPort: 8083
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: tmp          # the only path the JVM needs to write
+          mountPath: /tmp
+        lifecycle:
+          preStop:
+            exec:
+              # Endpoint removal is asynchronous. Sleep so in-flight requests
+              # drain instead of hitting a socket that is already closing.
+              command: ["sh","-c","sleep 10"]
         env:
+        # These services verify tokens minted by user-service, so they need the
+        # same signing key. Without it they had no way to authenticate anyone —
+        # every endpoint answered anonymous callers.
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: JWT_SECRET
         - name: SPRING_DATASOURCE_URL
           valueFrom:
             secretKeyRef:
@@ -285,12 +385,51 @@ spec:
       labels:
         app: inventory-service
     spec:
+      # Give kube-proxy time to remove this pod from the Service endpoints
+      # before the JVM stops accepting. Chaos test showed a 502 + five 5s
+      # timeouts on every pod kill without this.
+      terminationGracePeriodSeconds: 45
+      # None of these services call the Kubernetes API, so they must not carry
+      # a token that a compromised container could replay.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+      - name: tmp
+        emptyDir: {}
       containers:
       - name: inventory-service
         image: REGISTRY/ecommerce/inventory-service:IMAGE_TAG
         ports:
         - containerPort: 8084
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: tmp          # the only path the JVM needs to write
+          mountPath: /tmp
+        lifecycle:
+          preStop:
+            exec:
+              # Endpoint removal is asynchronous. Sleep so in-flight requests
+              # drain instead of hitting a socket that is already closing.
+              command: ["sh","-c","sleep 10"]
         env:
+        # These services verify tokens minted by user-service, so they need the
+        # same signing key. Without it they had no way to authenticate anyone —
+        # every endpoint answered anonymous callers.
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: JWT_SECRET
         - name: SPRING_DATASOURCE_URL
           valueFrom:
             secretKeyRef:
@@ -370,12 +509,51 @@ spec:
       labels:
         app: payment-service
     spec:
+      # Give kube-proxy time to remove this pod from the Service endpoints
+      # before the JVM stops accepting. Chaos test showed a 502 + five 5s
+      # timeouts on every pod kill without this.
+      terminationGracePeriodSeconds: 45
+      # None of these services call the Kubernetes API, so they must not carry
+      # a token that a compromised container could replay.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+      - name: tmp
+        emptyDir: {}
       containers:
       - name: payment-service
         image: REGISTRY/ecommerce/payment-service:IMAGE_TAG
         ports:
         - containerPort: 8085
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: tmp          # the only path the JVM needs to write
+          mountPath: /tmp
+        lifecycle:
+          preStop:
+            exec:
+              # Endpoint removal is asynchronous. Sleep so in-flight requests
+              # drain instead of hitting a socket that is already closing.
+              command: ["sh","-c","sleep 10"]
         env:
+        # These services verify tokens minted by user-service, so they need the
+        # same signing key. Without it they had no way to authenticate anyone —
+        # every endpoint answered anonymous callers.
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: JWT_SECRET
         - name: SPRING_DATASOURCE_URL
           valueFrom:
             secretKeyRef:
@@ -445,11 +623,42 @@ spec:
       labels:
         app: notification-service
     spec:
+      # Give kube-proxy time to remove this pod from the Service endpoints
+      # before the JVM stops accepting. Chaos test showed a 502 + five 5s
+      # timeouts on every pod kill without this.
+      terminationGracePeriodSeconds: 45
+      # None of these services call the Kubernetes API, so they must not carry
+      # a token that a compromised container could replay.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+      - name: tmp
+        emptyDir: {}
       containers:
       - name: notification-service
         image: REGISTRY/ecommerce/notification-service:IMAGE_TAG
         ports:
         - containerPort: 8086
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: tmp          # the only path the JVM needs to write
+          mountPath: /tmp
+        lifecycle:
+          preStop:
+            exec:
+              # Endpoint removal is asynchronous. Sleep so in-flight requests
+              # drain instead of hitting a socket that is already closing.
+              command: ["sh","-c","sleep 10"]
         env:
         - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
           valueFrom:

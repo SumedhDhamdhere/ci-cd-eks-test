@@ -26,10 +26,18 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
 echo "=== [1/4] Create ECR Repos ==="
 for svc in $SERVICES; do
-  aws ecr create-repository \
-    --repository-name ecommerce/$svc \
-    --image-scanning-configuration scanOnPush=true \
-    --encryption-configuration encryptionType=AES256
+  # Idempotent. Re-running this script is the normal case (rebuild, retag,
+  # redeploy), but create-repository throws RepositoryAlreadyExistsException
+  # the second time and `set -e` then kills the script before anything is
+  # built or pushed.
+  if aws ecr describe-repositories --repository-names ecommerce/$svc >/dev/null 2>&1; then
+    echo "  Exists: ecommerce/$svc"
+  else
+    aws ecr create-repository \
+      --repository-name ecommerce/$svc \
+      --image-scanning-configuration scanOnPush=true \
+      --encryption-configuration encryptionType=AES256
+  fi
 
   # Keep only last 10 images — saves storage cost
   aws ecr put-lifecycle-policy \
@@ -50,8 +58,18 @@ for svc in $SERVICES; do
 done
 
 echo "=== [4/4] Docker Build + Push ==="
-IMAGE_TAG=$(git -C $ROOT rev-parse --short HEAD 2>/dev/null || echo "local-$(date +%s)")
-echo "  Tag: $IMAGE_TAG (git SHA — immutable, rollback-safe)"
+# A git SHA is only immutable if the tree actually matches that commit. With
+# uncommitted changes the SHA is a lie: the same tag ends up pointing at two
+# different builds, and because the deployments use imagePullPolicy IfNotPresent
+# a node that already cached the earlier image will keep running the OLD code
+# while every dashboard says the new tag is deployed.
+IMAGE_TAG=$(git -C $ROOT rev-parse --short HEAD 2>/dev/null || echo "local")
+if [ -n "$(git -C $ROOT status --porcelain 2>/dev/null)" ]; then
+  IMAGE_TAG="${IMAGE_TAG}-dirty-$(date +%s)"
+  echo "  Working tree is dirty — tagging $IMAGE_TAG so this build cannot be"
+  echo "  confused with the committed one. Commit before a real release."
+fi
+echo "  Tag: $IMAGE_TAG"
 
 for svc in $SERVICES; do
   docker build -t $REGISTRY/ecommerce/$svc:$IMAGE_TAG -t $REGISTRY/ecommerce/$svc:latest $ROOT/$svc/

@@ -172,11 +172,31 @@ aws ec2 create-network-acl-entry \
   --protocol -1 --port-range From=0,To=65535 \
   --cidr-block 0.0.0.0/0 --rule-action allow
 
-# Associate with public subnets
-aws ec2 replace-network-acl-association \
-  --network-acl-id $NACL --association-id $PUB1
-aws ec2 replace-network-acl-association \
-  --network-acl-id $NACL --association-id $PUB2
+# Associate with public subnets.
+#
+# --association-id wants the id of the *association* between a subnet and the
+# NACL it currently uses (aclassoc-...), not the subnet id. Passing $PUB1
+# straight in failed with
+#   InvalidAssociationID.NotFound: The network ACL association ID
+#   'subnet-3095fb6d' does not exist
+# and since this script runs under `set -e`, everything after it was skipped —
+# so the NACL was created but never actually attached to anything.
+#
+# Every subnet begins associated with the VPC's default NACL, so look that
+# association up and replace it.
+for SUBNET in $PUB1 $PUB2; do
+  ASSOC_ID=$(aws ec2 describe-network-acls \
+    --filters "Name=association.subnet-id,Values=$SUBNET" \
+    --query "NetworkAcls[].Associations[?SubnetId=='$SUBNET'].NetworkAclAssociationId" \
+    --output text)
+  if [ -z "$ASSOC_ID" ]; then
+    echo "  WARNING: no NACL association found for $SUBNET — skipping"
+    continue
+  fi
+  aws ec2 replace-network-acl-association \
+    --network-acl-id $NACL --association-id $ASSOC_ID >/dev/null
+  echo "  associated $SUBNET ($ASSOC_ID) -> $NACL"
+done
 
 echo "  NACL: $NACL"
 echo "  Rules: allow 80, 443, ephemeral | deny all else"

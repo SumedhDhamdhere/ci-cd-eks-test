@@ -1,0 +1,39 @@
+# ================================================================
+# PodDisruptionBudget
+#
+# WHAT THIS CLOSES
+#   A PDB caps how many pods of a workload may be *voluntarily* removed at
+#   once — node drains, cluster upgrades, `kubectl drain`, autoscaler
+#   scale-in. Without one, draining a node can take every replica of a
+#   service simultaneously and the API goes dark until the pods reschedule.
+#
+#   It does NOT protect against involuntary disruption (node crash, OOM
+#   kill). That is what replicas across nodes are for.
+#
+# WHY ONLY KONG
+#   A PDB with minAvailable: 1 over a workload that runs ONE replica is a
+#   deadlock: the budget can never be satisfied while that pod is being
+#   evicted, so `kubectl drain` hangs forever. A PDB is only meaningful
+#   above one replica.
+#
+#   Kong is the single ingress path for the whole system, so it was raised
+#   to minReplicas: 2 (see kong-hpa) and gets a real budget here.
+#
+#   The six application services still run replicas: 1 on this practice
+#   cluster to stay inside its RAM. That is a deliberate, temporary tradeoff
+#   and NOT what should go to AWS: on EKS each of them should run
+#   replicas: 2 across two AZs with the same budget shape as below. Adding
+#   the PDBs now, while they are at one replica, would break node drains.
+# ================================================================
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: kong
+  namespace: ecommerce
+spec:
+  # At 2-3 replicas this allows exactly one to be taken at a time, so a node
+  # drain rolls through the gateway instead of removing all of it.
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: kong

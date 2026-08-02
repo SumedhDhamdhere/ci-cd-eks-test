@@ -234,6 +234,16 @@ spec:
             secretKeyRef:
               name: app-secrets
               key: PRODUCT_DB_PASS
+        # Without limits these two could consume whatever the node has left and
+        # starve every other pod on it. The other three Postgres StatefulSets
+        # already carried this block; these two were missed.
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
         volumeMounts:
         - name: data
           mountPath: /var/lib/postgresql/data
@@ -291,6 +301,16 @@ spec:
             secretKeyRef:
               name: app-secrets
               key: INVENTORY_DB_PASS
+        # Without limits these two could consume whatever the node has left and
+        # starve every other pod on it. The other three Postgres StatefulSets
+        # already carried this block; these two were missed.
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
         volumeMounts:
         - name: data
           mountPath: /var/lib/postgresql/data

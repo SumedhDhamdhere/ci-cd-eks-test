@@ -1,0 +1,355 @@
+# ================================================================
+# NetworkPolicy — default-deny + least-privilege allows
+#
+# WHAT THIS CLOSES
+#   Kubernetes allows all pod-to-pod traffic by default. Without these
+#   policies any pod — a compromised service, a malicious image, a debug
+#   container — can reach every Postgres instance, Redis and Kafka, and can
+#   also open outbound internet connections to exfiltrate what it reads.
+#
+#   The same hole was demonstrated live on the sibling project: a plain
+#   busybox pod reached MySQL/Mongo, and a mysql-client pod then read every
+#   user credential and created/dropped a table.
+#
+# DESIGN
+#   Each service reaches ONLY its own database. order-service cannot touch
+#   postgres-user; notification-service cannot touch any database at all.
+#   That is the database-per-service boundary actually enforced at the
+#   network layer instead of just being a naming convention.
+#
+# CNI
+#   Verified enforced on k3s (Flannel + kube-router policy controller).
+#   On EKS the AWS VPC CNI needs its network-policy agent enabled, or
+#   Calico/Cilium. ALWAYS verify after applying — the test is at the bottom.
+# ================================================================
+
+# ---------- 1. Deny everything, both directions ----------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: ecommerce
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+
+---
+# ---------- 2. DNS for every pod ----------
+# Forgetting this is the most common way a default-deny rollout takes an
+# application down — nothing can resolve service names.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: ecommerce
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+
+---
+# ---------- 3. Kong: public entry point ----------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kong
+  namespace: ecommerce
+spec:
+  podSelector: {matchLabels: {app: kong}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Reached from outside the cluster (ALB / port-forward), but ONLY on the
+    # proxy and status ports. An unrestricted `- {}` also exposed the Admin
+    # API on 8001, which can create routes and disable plugins and has no
+    # authentication of its own. 8001 is now bound to loopback as well, so
+    # this is the second of two independent controls — necessary because on
+    # EKS the VPC CNI does not enforce NetworkPolicy unless the policy agent
+    # is explicitly enabled.
+    - ports:
+        - {protocol: TCP, port: 8000}   # proxy
+        - {protocol: TCP, port: 8100}   # status / health
+  egress:
+    - to:
+        - podSelector:
+            matchExpressions:
+              - {key: app, operator: In, values: [user-service, product-service,
+                  order-service, inventory-service, payment-service, notification-service]}
+    # Rate limiting moved from policy: local to a shared Redis counter, so the
+    # gateway now needs to reach Redis. Without this the plugin fails open.
+    - to: [{podSelector: {matchLabels: {app: redis}}}]
+      ports: [{protocol: TCP, port: 6379}]
+
+---
+# ---------- 4. Services accept traffic from Kong only ----------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: services-ingress-from-kong
+  namespace: ecommerce
+spec:
+  podSelector:
+    matchExpressions:
+      - {key: app, operator: In, values: [user-service, product-service,
+          order-service, inventory-service, payment-service, notification-service]}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app: kong}}
+
+---
+# ---------- 5. user-service → its own DB + Redis (sessions) ----------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: user-service-egress
+  namespace: ecommerce
+spec:
+  podSelector: {matchLabels: {app: user-service}}
+  policyTypes: [Egress]
+  egress:
+    - to: [{podSelector: {matchLabels: {app: postgres-user}}}]
+      ports: [{protocol: TCP, port: 5432}]
+    - to: [{podSelector: {matchLabels: {app: redis}}}]
+      ports: [{protocol: TCP, port: 6379}]
+
+---
+# ---------- 6. product-service → its DB + Redis (cache) + Kafka ----------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: product-service-egress
+  namespace: ecommerce
+spec:
+  podSelector: {matchLabels: {app: product-service}}
+  policyTypes: [Egress]
+  egress:
+    - to: [{podSelector: {matchLabels: {app: postgres-product}}}]
+      ports: [{protocol: TCP, port: 5432}]
+    - to: [{podSelector: {matchLabels: {app: redis}}}]
+      ports: [{protocol: TCP, port: 6379}]
+    - to: [{podSelector: {matchLabels: {app: kafka}}}]
+      ports: [{protocol: TCP, port: 9092}]
+
+---
+# ---------- 7. order-service → its DB + Kafka ----------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: order-service-egress
+  namespace: ecommerce
+spec:
+  podSelector: {matchLabels: {app: order-service}}
+  policyTypes: [Egress]
+  egress:
+    - to: [{podSelector: {matchLabels: {app: postgres-order}}}]
+      ports: [{protocol: TCP, port: 5432}]
+    - to: [{podSelector: {matchLabels: {app: kafka}}}]
+      ports: [{protocol: TCP, port: 9092}]
+
+---
+# ---------- 8. inventory-service → its DB + Redis (reservations) + Kafka ----------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: inventory-service-egress
+  namespace: ecommerce
+spec:
+  podSelector: {matchLabels: {app: inventory-service}}
+  policyTypes: [Egress]
+  egress:
+    - to: [{podSelector: {matchLabels: {app: postgres-inventory}}}]
+      ports: [{protocol: TCP, port: 5432}]
+    - to: [{podSelector: {matchLabels: {app: redis}}}]
+      ports: [{protocol: TCP, port: 6379}]
+    - to: [{podSelector: {matchLabels: {app: kafka}}}]
+      ports: [{protocol: TCP, port: 9092}]
+
+---
+# ---------- 9. payment-service → its DB + Kafka ----------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: payment-service-egress
+  namespace: ecommerce
+spec:
+  podSelector: {matchLabels: {app: payment-service}}
+  policyTypes: [Egress]
+  egress:
+    - to: [{podSelector: {matchLabels: {app: postgres-payment}}}]
+      ports: [{protocol: TCP, port: 5432}]
+    - to: [{podSelector: {matchLabels: {app: kafka}}}]
+      ports: [{protocol: TCP, port: 9092}]
+
+---
+# ---------- 10. notification-service → Kafka only ----------
+# It owns no database. Note it also needs egress to AWS SES in a real
+# deployment — add an ipBlock (or a VPC endpoint) for that on AWS.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: notification-service-egress
+  namespace: ecommerce
+spec:
+  podSelector: {matchLabels: {app: notification-service}}
+  policyTypes: [Egress]
+  egress:
+    - to: [{podSelector: {matchLabels: {app: kafka}}}]
+      ports: [{protocol: TCP, port: 9092}]
+
+---
+# ---------- 11. Each Postgres accepts only its own service ----------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-user-ingress
+  namespace: ecommerce
+spec:
+  podSelector: {matchLabels: {app: postgres-user}}
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{podSelector: {matchLabels: {app: user-service}}}]
+      ports: [{protocol: TCP, port: 5432}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-product-ingress
+  namespace: ecommerce
+spec:
+  podSelector: {matchLabels: {app: postgres-product}}
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{podSelector: {matchLabels: {app: product-service}}}]
+      ports: [{protocol: TCP, port: 5432}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-order-ingress
+  namespace: ecommerce
+spec:
+  podSelector: {matchLabels: {app: postgres-order}}
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{podSelector: {matchLabels: {app: order-service}}}]
+      ports: [{protocol: TCP, port: 5432}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-inventory-ingress
+  namespace: ecommerce
+spec:
+  podSelector: {matchLabels: {app: postgres-inventory}}
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{podSelector: {matchLabels: {app: inventory-service}}}]
+      ports: [{protocol: TCP, port: 5432}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-payment-ingress
+  namespace: ecommerce
+spec:
+  podSelector: {matchLabels: {app: postgres-payment}}
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{podSelector: {matchLabels: {app: payment-service}}}]
+      ports: [{protocol: TCP, port: 5432}]
+
+---
+# ---------- 12. Redis: only the three services that actually use it ----------
+# user (JWT sessions) · product (cache) · inventory (reservations)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-ingress
+  namespace: ecommerce
+spec:
+  podSelector: {matchLabels: {app: redis}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              # kong was added when rate limiting moved to policy: redis.
+              - {key: app, operator: In, values: [user-service, product-service, inventory-service, kong]}
+      ports: [{protocol: TCP, port: 6379}]
+
+---
+# ---------- 13. Kafka: producers and consumers, plus its own peer traffic ----------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kafka-ingress
+  namespace: ecommerce
+spec:
+  podSelector: {matchLabels: {app: kafka}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - {key: app, operator: In, values: [product-service, order-service,
+                  inventory-service, payment-service, notification-service, kafka]}
+      ports:
+        - {protocol: TCP, port: 9092}
+        - {protocol: TCP, port: 9093}     # KRaft controller
+
+# ================================================================
+# VERIFY — do not assume the CNI enforces this
+#
+#   kubectl -n ecommerce run np-test --image=busybox:1.36 --restart=Never \
+#     --command -- sleep 300
+#
+#   # all of these MUST fail
+#   kubectl -n ecommerce exec np-test -- timeout 4 nc -z postgres-user 5432
+#   kubectl -n ecommerce exec np-test -- timeout 4 nc -z redis 6379
+#   kubectl -n ecommerce exec np-test -- timeout 4 nc -z 1.1.1.1 443
+#
+#   kubectl -n ecommerce delete pod np-test
+#
+# Then confirm the app still works — a default-deny rollout that breaks the
+# application is not a fix:
+#   bash .github/smoke-test.sh
+# ================================================================
+
+# ================================================================
+# DECISION — the "data tier" question, resolved
+#
+# scripts/01-vpc.sh creates two data subnets (10.0.5.0/24, 10.0.6.0/24) and a
+# db-sg with rules for 5432/6379/9092. Neither is used: Postgres, Redis and
+# Kafka are StatefulSets, so they run as pods on EKS nodes in the PRIVATE
+# subnets. db-sg is never attached to anything.
+#
+# Two ways to resolve that gap:
+#
+#   A. Make the data tier real — replace the StatefulSets with RDS,
+#      ElastiCache and MSK, placed in the data subnets via subnet groups.
+#      Closest to production. Costs money, and Floci cannot emulate it
+#      faithfully.
+#
+#   B. Accept that this is a 2-tier deployment and enforce isolation where the
+#      workloads actually live — in Kubernetes, with the policies above.
+#
+# ➜ B was chosen, and the policies in this file ARE that isolation. They are
+#   stricter than db-sg would have been: db-sg allowed any pod carrying eks-sg
+#   to reach any database on 5432, whereas these policies allow ONLY
+#   order-service to reach postgres-order, and so on. Security groups cannot
+#   express per-pod rules — they filter at the ENI level, and pod-to-pod
+#   traffic on the CNI overlay largely never traverses them.
+#
+# Follow-up in scripts/01-vpc.sh: the data subnets and db-sg should be removed,
+# or the comments corrected. Leaving them implies a boundary the deployment
+# does not have — which is worse than not having them, because a future reader
+# will "fix" a connectivity problem by editing a security group that was never
+# in the path.
+# ================================================================
