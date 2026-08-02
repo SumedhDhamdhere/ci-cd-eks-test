@@ -56,20 +56,60 @@ data:
             - 'payment-service.ecommerce.svc.cluster.local:8085'
             - 'notification-service.ecommerce.svc.cluster.local:8086'
 
-      # Kong metrics
-      - job_name: 'kong'
-        static_configs:
-          - targets:
-            - 'kong-admin.ecommerce.svc.cluster.local:8001'
-        metrics_path: '/metrics'
+      # Kong is discovered by the kubernetes-pods job above, through the
+      # prometheus.io/* annotations on its Deployment. There is deliberately no
+      # separate job here: the old one scraped kong-admin:8001, a Service that
+      # was removed when the unauthenticated Admin API was bound to loopback.
+      # Metrics now come from the status listener on 8100.
 
-      # Kafka metrics (via JMX exporter)
+      # Kafka consumer lag.
+      #
+      # The previous job scraped kafka-0/1/2 on 9101 expecting a JMX exporter.
+      # There is one broker, not three, and no JMX exporter is enabled - so two
+      # targets did not resolve at all and the third refused the connection.
+      #
+      # kafka-exporter speaks the Kafka protocol rather than JMX and reports
+      # consumer group lag per topic, which is the metric that actually matters
+      # here: reading lag against order.created and payment.processed is how the
+      # stranded-order bug was tracked down.
       - job_name: 'kafka'
         static_configs:
-          - targets:
-            - 'kafka-0.kafka.ecommerce.svc.cluster.local:9101'
-            - 'kafka-1.kafka.ecommerce.svc.cluster.local:9101'
-            - 'kafka-2.kafka.ecommerce.svc.cluster.local:9101'
+          - targets: ['kafka-exporter.monitoring.svc.cluster.local:9308']
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus
+rules:
+  # Read-only, and only the object kinds service discovery needs to turn a pod
+  # into a scrape target.
+  - apiGroups: [""]
+    resources: [nodes, nodes/metrics, services, endpoints, pods]
+    verbs: [get, list, watch]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: [endpointslices]
+    verbs: [get, list, watch]
+  - nonResourceURLs: ["/metrics"]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: monitoring
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -86,6 +126,14 @@ spec:
       labels:
         app: prometheus
     spec:
+      # Without this Prometheus runs as the namespace's `default` account, which
+      # cannot list pods. Every kubernetes_sd_configs job silently produced zero
+      # targets and the log filled with:
+      #   Failed to watch *v1.Pod: pods is forbidden:
+      #   User "system:serviceaccount:monitoring:default" cannot list resource "pods"
+      # The ServiceAccount further down this file belongs to promtail, not to
+      # Prometheus — which is easy to miss when both are in one manifest.
+      serviceAccountName: prometheus
       containers:
       - name: prometheus
         image: prom/prometheus:v2.47.0
@@ -97,6 +145,10 @@ spec:
         volumeMounts:
         - name: config
           mountPath: /etc/prometheus
+        # prometheus.yml has always declared rule_files: /etc/prometheus/rules/*.yml
+        # while nothing was ever mounted there, so there were no alerts at all.
+        - name: rules
+          mountPath: /etc/prometheus/rules
         - name: data
           mountPath: /prometheus
         resources:
@@ -112,6 +164,9 @@ spec:
           name: prometheus-config
       - name: data
         emptyDir: {}
+      - name: rules
+        configMap:
+          name: prometheus-rules
 ---
 apiVersion: v1
 kind: Service
@@ -135,11 +190,23 @@ data:
   datasources.yaml: |
     apiVersion: 1
     datasources:
+      # The uid is declared, not left to Grafana.
+      #
+      # Without it Grafana invents one (PBFA97CFB590B2093 here), and any
+      # provisioned dashboard that names a datasource has to guess. Every panel
+      # in ecommerce.json pointed at uid "prometheus", matched nothing, and
+      # rendered "No data" with an error badge — while Prometheus held the data
+      # the whole time.
+      #
+      # A generated uid is also not stable across a fresh install, so a
+      # dashboard that works here would break on the next cluster.
       - name: Prometheus
+        uid: prometheus
         type: prometheus
         url: http://prometheus.monitoring.svc.cluster.local:9090
         isDefault: true
       - name: Loki
+        uid: loki
         type: loki
         url: http://loki.monitoring.svc.cluster.local:3100
 ---
@@ -171,6 +238,10 @@ spec:
         volumeMounts:
         - name: datasources
           mountPath: /etc/grafana/provisioning/datasources
+        - name: dashboard-provider
+          mountPath: /etc/grafana/provisioning/dashboards
+        - name: dashboards
+          mountPath: /var/lib/grafana/dashboards
         - name: data
           mountPath: /var/lib/grafana
         resources:
@@ -186,6 +257,12 @@ spec:
           name: grafana-datasources
       - name: data
         emptyDir: {}
+      - name: dashboard-provider
+        configMap:
+          name: grafana-dashboard-provider
+      - name: dashboards
+        configMap:
+          name: grafana-dashboards
 ---
 apiVersion: v1
 kind: Service
@@ -341,3 +418,55 @@ spec:
       - name: config
         configMap:
           name: promtail-config
+---
+# ================================================================
+# kafka-exporter — consumer group lag as Prometheus metrics
+#
+# Replaces the JMX exporter the old scrape config assumed but which was never
+# deployed. It connects to Kafka as an ordinary client, so it needs no agent
+# inside the broker and no restart of the StatefulSet.
+# ================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-exporter
+  namespace: monitoring
+  labels: {app: kafka-exporter}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: kafka-exporter}
+  template:
+    metadata:
+      labels: {app: kafka-exporter}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: kafka-exporter
+          image: danielqsj/kafka-exporter:v1.7.0
+          args:
+            - --kafka.server=kafka-0.kafka.ecommerce.svc.cluster.local:9092
+          ports:
+            - containerPort: 9308
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          resources:
+            requests: {memory: "64Mi", cpu: "50m"}
+            limits:   {memory: "128Mi", cpu: "200m"}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-exporter
+  namespace: monitoring
+spec:
+  selector: {app: kafka-exporter}
+  ports:
+    - port: 9308
+      targetPort: 9308

@@ -1,6 +1,7 @@
 package com.ecommerce.inventory.service;
 
 import com.ecommerce.inventory.model.Inventory;
+import com.ecommerce.inventory.config.InventoryMetrics;
 import com.ecommerce.inventory.repository.InventoryRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -31,13 +32,14 @@ class InventoryServiceTest {
     @Mock private InventoryRepository inventoryRepository;
     @Mock private RedisTemplate<String, String> redisTemplate;
     @Mock private HashOperations<String, Object, Object> hashOperations;
+    @Mock private InventoryMetrics metrics;
 
     private InventoryService inventoryService;
 
     @BeforeEach
     void setUp() {
         when(redisTemplate.opsForHash()).thenReturn(hashOperations);
-        inventoryService = new InventoryService(inventoryRepository, redisTemplate);
+        inventoryService = new InventoryService(inventoryRepository, redisTemplate, metrics);
     }
 
     // ---------- reserveStock: now a single atomic UPDATE ----------

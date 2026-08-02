@@ -1,0 +1,128 @@
+# ================================================================
+# Prometheus alert rules
+#
+# prometheus.yml has always carried `rule_files: /etc/prometheus/rules/*.yml`,
+# but that directory did not exist — so there were no alerts at all. Everything
+# below is mounted there.
+#
+# Each rule is here because something actually went wrong without it. The
+# ordering is deliberate: the business rules come first, because they are the
+# ones no amount of infrastructure monitoring would have caught.
+# ================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-rules
+  namespace: monitoring
+data:
+  business.yml: |
+    groups:
+      - name: business
+        rules:
+          # ---------------------------------------------------------------
+          # THE one. When four orders were stranded at PENDING for good, every
+          # infrastructure signal was green: pods healthy, consumer lag 0, no
+          # errors, normal CPU. This is the only number that would have shouted.
+          #
+          # A healthy saga finishes in seconds. Five minutes means replies are
+          # being lost.
+          # ---------------------------------------------------------------
+          - alert: OrdersStuckPending
+            expr: orders_pending_oldest_age_seconds > 300
+            for: 2m
+            labels: {severity: critical}
+            annotations:
+              summary: "An order has been PENDING for {{ $value | humanizeDuration }}"
+              description: >
+                The oldest unfinished order is far past a normal saga round trip.
+                A saga reply has probably been lost. Check consumer lag and
+                order-service logs for "unknown orderId".
+
+          # ---------------------------------------------------------------
+          # Money moved for an order the system cannot find. The stale-order
+          # reaper will then cancel it, and there is no refund path anywhere in
+          # this system. Any occurrence is an incident.
+          # ---------------------------------------------------------------
+          - alert: PaymentWithoutOrder
+            expr: increase(payment_without_order_total[10m]) > 0
+            labels: {severity: critical}
+            annotations:
+              summary: "payment.processed arrived for an unknown order"
+              description: >
+                A customer may have been charged for an order that will be
+                cancelled without a refund. Reconcile the payments table against
+                orders before anything else.
+
+          - alert: SagaSlow
+            expr: histogram_quantile(0.95, sum(rate(saga_duration_seconds_bucket[5m])) by (le)) > 30
+            for: 5m
+            labels: {severity: warning}
+            annotations:
+              summary: "p95 saga duration is {{ $value }}s"
+
+          # Rejections are correct behaviour — refusing to sell the eleventh of
+          # ten units is the system working. A sustained majority of rejections
+          # is a stock problem, not a bug.
+          - alert: InventoryMostlyRejecting
+            expr: >
+              sum(rate(inventory_reserve_total{result="rejected"}[10m]))
+              /
+              clamp_min(sum(rate(inventory_reserve_total[10m])), 0.001) > 0.5
+            for: 10m
+            labels: {severity: warning}
+            annotations:
+              summary: "More than half of stock reservations are being rejected"
+
+  platform.yml: |
+    groups:
+      - name: platform
+        rules:
+          - alert: TargetDown
+            expr: up == 0
+            for: 2m
+            labels: {severity: critical}
+            annotations:
+              summary: "{{ $labels.job }} target {{ $labels.instance }} is down"
+              description: >
+                All ten targets sat down for the entire life of this cluster
+                without anyone noticing, because nothing alerted on it.
+
+          - alert: HighErrorRate
+            expr: >
+              sum by (job) (rate(http_server_requests_seconds_count{status=~"5.."}[5m]))
+              /
+              clamp_min(sum by (job) (rate(http_server_requests_seconds_count[5m])), 0.001) > 0.01
+            for: 5m
+            labels: {severity: critical}
+            annotations:
+              summary: "{{ $labels.job }} is serving {{ $value | humanizePercentage }} 5xx"
+
+          - alert: HighLatency
+            expr: >
+              histogram_quantile(0.95,
+                sum by (job, le) (rate(http_server_requests_seconds_bucket[5m]))) > 1
+            for: 5m
+            labels: {severity: warning}
+            annotations:
+              summary: "{{ $labels.job }} p95 latency is {{ $value }}s"
+
+          # Kong was OOMKilled three times at 512Mi before anyone looked.
+          - alert: JvmHeapPressure
+            expr: >
+              sum by (job) (jvm_memory_used_bytes{area="heap"})
+              /
+              clamp_min(sum by (job) (jvm_memory_max_bytes{area="heap"}), 1) > 0.9
+            for: 10m
+            labels: {severity: warning}
+            annotations:
+              summary: "{{ $labels.job }} heap is {{ $value | humanizePercentage }} full"
+
+          - alert: KafkaConsumerLag
+            expr: sum by (consumergroup, topic) (kafka_consumergroup_lag) > 1000
+            for: 5m
+            labels: {severity: warning}
+            annotations:
+              summary: "{{ $labels.consumergroup }} is {{ $value }} messages behind on {{ $labels.topic }}"
+              description: >
+                Lag is the signal that found the stranded-order bug: 21 replies
+                consumed with lag 0 ruled out delivery and pointed at the code.

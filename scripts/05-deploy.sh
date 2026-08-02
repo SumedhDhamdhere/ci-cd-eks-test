@@ -135,8 +135,14 @@ kubectl apply -f k8s/security/pdb.yaml
 echo "  $(kubectl get netpol -n ecommerce --no-headers | wc -l) network policies, $(kubectl get pdb -n ecommerce --no-headers | wc -l) disruption budget(s)"
 
 echo "=== [8/9] Monitoring ==="
-kubectl apply -f k8s/monitoring/monitoring.yaml
-echo "  Prometheus + Grafana + Loki deployed"
+# The whole directory, not just monitoring.yaml. Prometheus now mounts the
+# prometheus-rules ConfigMap and Grafana mounts grafana-dashboards +
+# grafana-dashboard-provider, and those live in alerts.yaml and dashboards.yaml.
+# Applying only monitoring.yaml leaves both pods stuck in ContainerCreating
+# waiting on a ConfigMap nothing ever created.
+kubectl apply -f k8s/monitoring/
+echo "  Prometheus + Grafana + Loki + kafka-exporter deployed"
+echo "  $(kubectl get cm -n monitoring --no-headers | wc -l) config maps, alert rules and dashboards provisioned"
 
 echo "=== [9/9] Verify Everything ==="
 echo ""

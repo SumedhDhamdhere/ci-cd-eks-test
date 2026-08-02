@@ -1,6 +1,7 @@
 package com.ecommerce.order.service;
 
 import com.ecommerce.order.dto.CreateOrderRequest;
+import com.ecommerce.order.config.OrderMetrics;
 import com.ecommerce.order.event.OrderDomainEvents;
 import com.ecommerce.order.model.Order;
 import com.ecommerce.order.repository.OrderRepository;
@@ -28,12 +29,13 @@ class OrderServiceTest {
     // and OrderEventRelay forwards it to Kafka after the transaction commits,
     // so a saga reply can never arrive before the order row is visible.
     @Mock private ApplicationEventPublisher events;
+    @Mock private OrderMetrics metrics;
 
     private OrderService orderService;
 
     @BeforeEach
     void setUp() {
-        orderService = new OrderService(orderRepository, events);
+        orderService = new OrderService(orderRepository, events, metrics);
     }
 
     private CreateOrderRequest.OrderItemRequest item(long productId, int qty, String price) {

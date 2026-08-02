@@ -28,4 +28,6 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        # `prometheus` was missing, so /actuator/prometheus 404'd and the
+        # scrape target was permanently down.
+        include: health,info,metrics,prometheus

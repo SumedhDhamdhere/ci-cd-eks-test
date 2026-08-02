@@ -41,5 +41,14 @@
       <artifactId>ses</artifactId>
       <version>2.21.0</version>
     </dependency>
+    <!-- Exposes /actuator/prometheus. Prometheus has been scraping that path
+         since the monitoring stack was deployed, but without this registry the
+         endpoint does not exist and every scrape returned 404 - all six
+         "spring-boot-services" targets were down and every Grafana panel was
+         empty. Version comes from the Spring Boot BOM. -->
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-registry-prometheus</artifactId>
+    </dependency>
   </dependencies>
 </project>

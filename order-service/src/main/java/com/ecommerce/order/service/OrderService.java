@@ -4,6 +4,7 @@ import com.ecommerce.order.event.OrderDomainEvents;
 import com.ecommerce.order.model.Order;
 import com.ecommerce.order.model.OrderItem;
 import com.ecommerce.order.config.AuthenticatedUser;
+import com.ecommerce.order.config.OrderMetrics;
 import com.ecommerce.order.exception.AccessDeniedException;
 import com.ecommerce.order.exception.OrderNotFoundException;
 import com.ecommerce.order.repository.OrderRepository;
@@ -24,6 +25,7 @@ public class OrderService {
     // from inside the transaction let replies arrive before the order row was
     // visible, and those orders were silently stranded at PENDING.
     private final ApplicationEventPublisher events;
+    private final OrderMetrics metrics;
 
     /**
      * @param callerId the caller's id from the verified JWT. The request body no
@@ -55,6 +57,7 @@ public class OrderService {
 
         // Relayed to Kafka after commit, never before.
         events.publishEvent(new OrderDomainEvents.OrderCreated(saved));
+        metrics.orderCreated();
 
         log.info("Order created: id={}, userId={}, amount={}", saved.getId(), saved.getUserId(), total);
         return saved;
@@ -89,6 +92,7 @@ public class OrderService {
         order.setStatus(Order.OrderStatus.CANCELLED);
         Order saved = orderRepository.save(order);
         events.publishEvent(new OrderDomainEvents.OrderCancelled(saved, "User requested cancellation"));
+        metrics.orderCancelled(order.getCreatedAt());
         return saved;
     }
 
@@ -106,6 +110,7 @@ public class OrderService {
             // order we cannot find here is a paid order nobody will ever mark
             // paid — and StaleOrderReaper will then cancel it, with no refund
             // anywhere in the system. This must never be silent.
+            metrics.paymentWithoutOrder();
             log.error("PAYMENT WITHOUT ORDER: payment.processed for unknown orderId={} "
                     + "- the customer may have been charged for an order that does not exist", orderId);
             return;
@@ -115,6 +120,7 @@ public class OrderService {
         }
         order.setStatus(Order.OrderStatus.PAID);
         orderRepository.save(order);
+        metrics.orderPaid(order.getCreatedAt());
         log.info("Order {} marked PAID", orderId);
     }
 
@@ -132,6 +138,7 @@ public class OrderService {
         order.setStatus(Order.OrderStatus.CANCELLED);
         Order saved = orderRepository.save(order);
         events.publishEvent(new OrderDomainEvents.OrderCancelled(saved, reason));
+        metrics.orderCancelled(order.getCreatedAt());
         log.warn("Order {} cancelled due to payment failure: {}", orderId, reason);
     }
 
@@ -153,6 +160,7 @@ public class OrderService {
         order.setStatus(Order.OrderStatus.CANCELLED);
         Order saved = orderRepository.save(order);
         events.publishEvent(new OrderDomainEvents.OrderCancelled(saved, reason));
+        metrics.orderCancelled(order.getCreatedAt());
         log.warn("Order {} cancelled due to insufficient stock: {}", orderId, reason);
     }
 }

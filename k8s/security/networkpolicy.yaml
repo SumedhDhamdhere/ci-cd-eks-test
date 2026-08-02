@@ -102,6 +102,25 @@ spec:
   ingress:
     - from:
         - podSelector: {matchLabels: {app: kong}}
+    # Prometheus lives in the monitoring namespace and must reach the actuator
+    # port to scrape. Allowing only Kong above meant every scrape was refused
+    # and all six targets sat down - a default-deny rollout was verified against
+    # the application path but not the observability path, which is the first
+    # thing it breaks.
+    #
+    # Deliberately narrow: only the monitoring namespace, and only the ports the
+    # services actually listen on. This is not a hole back into the databases.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - {protocol: TCP, port: 8081}
+        - {protocol: TCP, port: 8082}
+        - {protocol: TCP, port: 8083}
+        - {protocol: TCP, port: 8084}
+        - {protocol: TCP, port: 8085}
+        - {protocol: TCP, port: 8086}
 
 ---
 # ---------- 5. user-service → its own DB + Redis (sessions) ----------
@@ -303,6 +322,16 @@ spec:
       ports:
         - {protocol: TCP, port: 9092}
         - {protocol: TCP, port: 9093}     # KRaft controller
+    # kafka-exporter reads consumer group lag as a normal Kafka client from the
+    # monitoring namespace. Lag is the metric that actually matters here — it is
+    # how the stranded-order bug was tracked down (21 replies consumed, lag 0,
+    # four orders still PENDING).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - {protocol: TCP, port: 9092}
 
 # ================================================================
 # VERIFY — do not assume the CNI enforces this

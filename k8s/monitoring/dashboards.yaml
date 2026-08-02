@@ -1,0 +1,752 @@
+# ================================================================
+# Grafana dashboards, provisioned from this file.
+#
+# Grafana had zero dashboards. The manifest wired up its datasources and
+# stopped there, so the whole stack rendered as an empty Grafana with a
+# Prometheus behind it that was scraping nothing.
+#
+# Provisioned rather than clicked together in the UI: a dashboard that only
+# exists inside the pod is gone the moment the pod is replaced.
+# ================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-provider
+  namespace: monitoring
+data:
+  provider.yaml: |
+    apiVersion: 1
+    providers:
+      - name: 'ecommerce'
+        orgId: 1
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 30
+        allowUiUpdates: true
+        options:
+          path: /var/lib/grafana/dashboards
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+  namespace: monitoring
+data:
+  ecommerce.json: |
+      {
+        "uid": "ecommerce-prod",
+        "title": "E-Commerce \u2014 production overview",
+        "tags": [
+          "ecommerce",
+          "production"
+        ],
+        "timezone": "browser",
+        "schemaVersion": 39,
+        "version": 1,
+        "refresh": "30s",
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "panels": [
+          {
+            "type": "row",
+            "title": "Business \u2014 what the customer experiences",
+            "gridPos": {
+              "x": 0,
+              "y": 0,
+              "w": 24,
+              "h": 1
+            },
+            "collapsed": false,
+            "panels": []
+          },
+          {
+            "type": "stat",
+            "title": "Oldest PENDING order",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "gridPos": {
+              "x": 0,
+              "y": 1,
+              "w": 6,
+              "h": 4
+            },
+            "targets": [
+              {
+                "expr": "orders_pending_oldest_age_seconds",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "s",
+                "decimals": 0,
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 60
+                    },
+                    {
+                      "color": "red",
+                      "value": 300
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "options": {
+              "colorMode": "value",
+              "graphMode": "area",
+              "textMode": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ]
+              }
+            }
+          },
+          {
+            "type": "stat",
+            "title": "Orders awaiting a saga reply",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "gridPos": {
+              "x": 6,
+              "y": 1,
+              "w": 6,
+              "h": 4
+            },
+            "targets": [
+              {
+                "expr": "orders_pending_count",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "short",
+                "decimals": 0,
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 5
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "options": {
+              "colorMode": "value",
+              "graphMode": "area",
+              "textMode": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ]
+              }
+            }
+          },
+          {
+            "type": "stat",
+            "title": "Payments with no order",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "gridPos": {
+              "x": 12,
+              "y": 1,
+              "w": 6,
+              "h": 4
+            },
+            "targets": [
+              {
+                "expr": "payment_without_order_total",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "short",
+                "decimals": 0,
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "red",
+                      "value": 1
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "options": {
+              "colorMode": "value",
+              "graphMode": "area",
+              "textMode": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ]
+              }
+            }
+          },
+          {
+            "type": "stat",
+            "title": "p95 saga duration",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "gridPos": {
+              "x": 18,
+              "y": 1,
+              "w": 6,
+              "h": 4
+            },
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.95, sum(rate(saga_duration_seconds_bucket[5m])) by (le))",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "s",
+                "decimals": 1,
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 10
+                    },
+                    {
+                      "color": "red",
+                      "value": 30
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "options": {
+              "colorMode": "value",
+              "graphMode": "area",
+              "textMode": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ]
+              }
+            }
+          },
+          {
+            "type": "timeseries",
+            "title": "Order outcomes",
+            "description": "created should equal paid + cancelled over time. A persistent gap means orders are entering the saga and never coming out \u2014 exactly the stranded-order bug.",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "gridPos": {
+              "x": 0,
+              "y": 5,
+              "w": 12,
+              "h": 8
+            },
+            "targets": [
+              {
+                "expr": "sum(rate(orders_created_total[5m])) * 60",
+                "legendFormat": "created/min",
+                "refId": "A"
+              },
+              {
+                "expr": "sum(rate(orders_completed_total{outcome=\"paid\"}[5m])) * 60",
+                "legendFormat": "paid/min",
+                "refId": "B"
+              },
+              {
+                "expr": "sum(rate(orders_completed_total{outcome=\"cancelled\"}[5m])) * 60",
+                "legendFormat": "cancelled/min",
+                "refId": "C"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "short",
+                "custom": {
+                  "lineWidth": 2,
+                  "fillOpacity": 8,
+                  "showPoints": "never"
+                }
+              },
+              "overrides": []
+            },
+            "options": {
+              "legend": {
+                "displayMode": "list",
+                "placement": "bottom"
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            }
+          },
+          {
+            "type": "timeseries",
+            "title": "Stock reservations",
+            "description": "Rejections are correct behaviour under contention \u2014 refusing the eleventh unit of ten. A sustained majority of rejections is a stock problem.",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "gridPos": {
+              "x": 12,
+              "y": 5,
+              "w": 12,
+              "h": 8
+            },
+            "targets": [
+              {
+                "expr": "sum(rate(inventory_reserve_total{result=\"accepted\"}[5m])) * 60",
+                "legendFormat": "accepted/min",
+                "refId": "A"
+              },
+              {
+                "expr": "sum(rate(inventory_reserve_total{result=\"rejected\"}[5m])) * 60",
+                "legendFormat": "rejected/min",
+                "refId": "B"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "short",
+                "custom": {
+                  "lineWidth": 2,
+                  "fillOpacity": 8,
+                  "showPoints": "never"
+                }
+              },
+              "overrides": []
+            },
+            "options": {
+              "legend": {
+                "displayMode": "list",
+                "placement": "bottom"
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            }
+          },
+          {
+            "type": "row",
+            "title": "RED \u2014 rate, errors, duration",
+            "gridPos": {
+              "x": 0,
+              "y": 13,
+              "w": 24,
+              "h": 1
+            },
+            "collapsed": false,
+            "panels": []
+          },
+          {
+            "type": "timeseries",
+            "title": "Request rate by service",
+            "description": "",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "gridPos": {
+              "x": 0,
+              "y": 14,
+              "w": 12,
+              "h": 8
+            },
+            "targets": [
+              {
+                "expr": "sum by (job) (rate(http_server_requests_seconds_count[5m]))",
+                "legendFormat": "{{job}}",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "reqps",
+                "custom": {
+                  "lineWidth": 2,
+                  "fillOpacity": 8,
+                  "showPoints": "never"
+                }
+              },
+              "overrides": []
+            },
+            "options": {
+              "legend": {
+                "displayMode": "list",
+                "placement": "bottom"
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            }
+          },
+          {
+            "type": "timeseries",
+            "title": "Error rate (5xx share)",
+            "description": "",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "gridPos": {
+              "x": 12,
+              "y": 14,
+              "w": 12,
+              "h": 8
+            },
+            "targets": [
+              {
+                "expr": "sum by (job) (rate(http_server_requests_seconds_count{status=~\"5..\"}[5m])) / clamp_min(sum by (job) (rate(http_server_requests_seconds_count[5m])), 0.001)",
+                "legendFormat": "{{job}}",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "percentunit",
+                "custom": {
+                  "lineWidth": 2,
+                  "fillOpacity": 8,
+                  "showPoints": "never"
+                }
+              },
+              "overrides": []
+            },
+            "options": {
+              "legend": {
+                "displayMode": "list",
+                "placement": "bottom"
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            }
+          },
+          {
+            "type": "timeseries",
+            "title": "Latency p50 / p95 / p99",
+            "description": "",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "gridPos": {
+              "x": 0,
+              "y": 22,
+              "w": 12,
+              "h": 8
+            },
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.50, sum by (le) (rate(http_server_requests_seconds_bucket[5m])))",
+                "legendFormat": "p50",
+                "refId": "A"
+              },
+              {
+                "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket[5m])))",
+                "legendFormat": "p95",
+                "refId": "B"
+              },
+              {
+                "expr": "histogram_quantile(0.99, sum by (le) (rate(http_server_requests_seconds_bucket[5m])))",
+                "legendFormat": "p99",
+                "refId": "C"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "s",
+                "custom": {
+                  "lineWidth": 2,
+                  "fillOpacity": 8,
+                  "showPoints": "never"
+                }
+              },
+              "overrides": []
+            },
+            "options": {
+              "legend": {
+                "displayMode": "list",
+                "placement": "bottom"
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            }
+          },
+          {
+            "type": "timeseries",
+            "title": "Responses by status",
+            "description": "A jump in 403 is worth a look: every service verifies its own JWT now, so it means a broken client \u2014 or someone trying endpoints without a token.",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "gridPos": {
+              "x": 12,
+              "y": 22,
+              "w": 12,
+              "h": 8
+            },
+            "targets": [
+              {
+                "expr": "sum by (status) (rate(http_server_requests_seconds_count[5m]))",
+                "legendFormat": "{{status}}",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "reqps",
+                "custom": {
+                  "lineWidth": 2,
+                  "fillOpacity": 8,
+                  "showPoints": "never"
+                }
+              },
+              "overrides": []
+            },
+            "options": {
+              "legend": {
+                "displayMode": "list",
+                "placement": "bottom"
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            }
+          },
+          {
+            "type": "row",
+            "title": "USE \u2014 resources",
+            "gridPos": {
+              "x": 0,
+              "y": 30,
+              "w": 24,
+              "h": 1
+            },
+            "collapsed": false,
+            "panels": []
+          },
+          {
+            "type": "timeseries",
+            "title": "JVM heap used",
+            "description": "Kong was OOMKilled three times at 512Mi before anyone looked at this.",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "gridPos": {
+              "x": 0,
+              "y": 31,
+              "w": 12,
+              "h": 8
+            },
+            "targets": [
+              {
+                "expr": "sum by (job) (jvm_memory_used_bytes{area=\"heap\"})",
+                "legendFormat": "{{job}}",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "bytes",
+                "custom": {
+                  "lineWidth": 2,
+                  "fillOpacity": 8,
+                  "showPoints": "never"
+                }
+              },
+              "overrides": []
+            },
+            "options": {
+              "legend": {
+                "displayMode": "list",
+                "placement": "bottom"
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            }
+          },
+          {
+            "type": "timeseries",
+            "title": "GC pause time",
+            "description": "",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "gridPos": {
+              "x": 12,
+              "y": 31,
+              "w": 12,
+              "h": 8
+            },
+            "targets": [
+              {
+                "expr": "sum by (job) (rate(jvm_gc_pause_seconds_sum[5m]))",
+                "legendFormat": "{{job}}",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "s",
+                "custom": {
+                  "lineWidth": 2,
+                  "fillOpacity": 8,
+                  "showPoints": "never"
+                }
+              },
+              "overrides": []
+            },
+            "options": {
+              "legend": {
+                "displayMode": "list",
+                "placement": "bottom"
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            }
+          },
+          {
+            "type": "timeseries",
+            "title": "Kafka consumer lag",
+            "description": "Lag is how the stranded-order bug was tracked down: 21 replies consumed with lag 0 ruled out delivery and pointed at the code.",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "gridPos": {
+              "x": 0,
+              "y": 39,
+              "w": 12,
+              "h": 8
+            },
+            "targets": [
+              {
+                "expr": "sum by (consumergroup, topic) (kafka_consumergroup_lag)",
+                "legendFormat": "{{consumergroup}} \u00b7 {{topic}}",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "short",
+                "custom": {
+                  "lineWidth": 2,
+                  "fillOpacity": 8,
+                  "showPoints": "never"
+                }
+              },
+              "overrides": []
+            },
+            "options": {
+              "legend": {
+                "displayMode": "list",
+                "placement": "bottom"
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            }
+          },
+          {
+            "type": "timeseries",
+            "title": "Scrape targets up",
+            "description": "Every one of these sat at 0 for the life of this cluster. Grafana looked perfectly healthy the whole time \u2014 it just had nothing to draw.",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "gridPos": {
+              "x": 12,
+              "y": 39,
+              "w": 12,
+              "h": 8
+            },
+            "targets": [
+              {
+                "expr": "sum by (job) (up)",
+                "legendFormat": "{{job}}",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "short",
+                "custom": {
+                  "lineWidth": 2,
+                  "fillOpacity": 8,
+                  "showPoints": "never"
+                }
+              },
+              "overrides": []
+            },
+            "options": {
+              "legend": {
+                "displayMode": "list",
+                "placement": "bottom"
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            }
+          }
+        ]
+      }

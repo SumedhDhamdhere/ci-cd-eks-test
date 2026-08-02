@@ -1,5 +1,6 @@
 package com.ecommerce.inventory.service;
 import com.ecommerce.inventory.model.Inventory;
+import com.ecommerce.inventory.config.InventoryMetrics;
 import com.ecommerce.inventory.repository.InventoryRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -12,6 +13,7 @@ import java.util.concurrent.TimeUnit;
 public class InventoryService {
     private final InventoryRepository inventoryRepository;
     private final RedisTemplate<String, String> redisTemplate;
+    private final InventoryMetrics metrics;
     // Tracks what each order reserved, so it can be confirmed or released later.
     // payment.processed carries only orderId/amount/success — no items — so
     // inventory must remember its own reservations.
@@ -36,10 +38,12 @@ public class InventoryService {
         int updated = inventoryRepository.reserveAtomic(productId, quantity);
 
         if (updated == 0) {
+            metrics.rejected();
             log.warn("Insufficient stock: productId={}, requested={}, orderId={}",
                     productId, quantity, orderId);
             return false;
         }
+        metrics.accepted();
 
         String key = RESERVATION_PREFIX + orderId;
         redisTemplate.opsForHash().increment(key, productId.toString(), quantity);
