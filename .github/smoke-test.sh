@@ -96,20 +96,33 @@ ADMIN_EMAIL="ci_admin_$(date +%s)@test.com"
 curl -s -o /dev/null -X POST "$BASE/api/users/register" -H 'Content-Type: application/json' \
   -d "{\"name\":\"CI Admin\",\"email\":\"$ADMIN_EMAIL\",\"password\":\"password123\"}"
 ADMIN_AUTH=""
+ADMIN_ROLE=""
 if command -v kubectl >/dev/null 2>&1; then
-  kubectl exec -n "$NS" postgres-user-0 -- \
-    psql -U postgres -d userdb -c "UPDATE users SET role='ADMIN' WHERE email='$ADMIN_EMAIL';" >/dev/null 2>&1
+  # The database user is not always "postgres" — CI builds app-secrets from
+  # GitHub secrets, so read whatever the services themselves are configured
+  # with instead of hardcoding one.
+  DB_USER=$(kubectl get secret app-secrets -n "$NS" -o jsonpath='{.data.USER_DB_USER}' 2>/dev/null | base64 -d 2>/dev/null)
+  DB_USER="${DB_USER:-postgres}"
+  if ! PROMOTE_OUT=$(kubectl exec -n "$NS" postgres-user-0 -- \
+        psql -U "$DB_USER" -d userdb -c "UPDATE users SET role='ADMIN' WHERE email='$ADMIN_EMAIL';" 2>&1); then
+    # Do not swallow this. It was hidden behind 2>&1 >/dev/null, the script
+    # carried on with a USER token, and six later checks failed with 403 while
+    # the real cause sat one line above them, unprinted.
+    echo "     promotion failed (db user '$DB_USER'): $PROMOTE_OUT"
+  fi
   curl -s -o /tmp/body.json -X POST "$BASE/api/users/login" -H 'Content-Type: application/json' \
     -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"password123\"}"
   ADMIN_TOKEN=$(json token)
-  [ -n "$ADMIN_TOKEN" ] && ADMIN_AUTH="Authorization: Bearer $ADMIN_TOKEN"
+  ADMIN_ROLE=$(claim "$ADMIN_TOKEN" role)
+  # A token is not enough — it has to actually carry ROLE_ADMIN.
+  [ "$ADMIN_ROLE" = "ADMIN" ] && ADMIN_AUTH="Authorization: Bearer $ADMIN_TOKEN"
 fi
 if [ -z "$ADMIN_AUTH" ]; then
-  echo "  ❌ could not obtain an ADMIN token — admin-only endpoints cannot be tested"
+  echo "  ❌ no ADMIN token (role='$ADMIN_ROLE') — admin-only endpoints cannot be tested"
   FAIL=$((FAIL+1))
   ADMIN_AUTH="$AUTH"
 else
-  echo "  ✅ ADMIN token obtained (role=$(claim "$ADMIN_TOKEN" role))"
+  echo "  ✅ ADMIN token obtained (role=$ADMIN_ROLE)"
   PASS=$((PASS+1))
 fi
 
