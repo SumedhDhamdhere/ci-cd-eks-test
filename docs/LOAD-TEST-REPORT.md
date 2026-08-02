@@ -25,6 +25,9 @@
 | NetworkPolicy | 🔴 none deployed by the scripts | ✅ 17, attacker pod blocked 4/4 |
 | ALB target sync | 🔴 one-time snapshot; dead IP after any restart | ✅ follows pod kills in ~15s |
 | CI smoke test | 🔴 ran entirely without a token | ✅ 29/29 incl. denial checks |
+| **Monitoring** | 🔴 **all 10 scrape targets down, 0 dashboards, 0 alert rules** | ✅ 10/10 up, 17 panels, 9 rules |
+| Business metrics | 🔴 none existed | ✅ 6, incl. oldest-PENDING gauge |
+| Alert delivery | 🔴 no Alertmanager | 🔴 **still none — rules fire into nothing** |
 
 ---
 
@@ -655,3 +658,94 @@ stands.**
 - Five services still have thin unit-test coverage, and there are no
   Testcontainers integration tests.
 - No distributed tracing or correlation-id propagation through Kafka headers.
+
+---
+
+# 13. Observability — deployed, and collecting nothing
+
+Prometheus, Grafana, Loki and promtail were all `Running`. Every scrape target
+was down, and had been since the cluster was built.
+
+```
+kafka [down] 3   ·   kong [down] 1   ·   spring-boot-services [down] 6
+up -> 10 series      (all value 0)
+jvm_memory_used_bytes -> 0
+kong_http_requests_total -> 0
+Grafana dashboards -> 0
+Prometheus alert rules -> 0     (rule_files pointed at a directory that did not exist)
+```
+
+Nobody noticed because **Grafana looked perfectly healthy the entire time** —
+`1/1 Running`, `/api/health` returning `"database": "ok"`. It stores nothing and
+asks Prometheus for everything, so with no data it simply drew empty panels. Up
+and useless are indistinguishable from the outside.
+
+## 13.1 Four causes
+
+| # | Cause | Whose |
+|---|---|---|
+| 1 | No `micrometer-registry-prometheus` dependency, and `prometheus` missing from the actuator exposure list → `/actuator/prometheus` returned **404** | pre-existing |
+| 2 | Prometheus ran as the `default` ServiceAccount and could not list pods, so every `kubernetes_sd_configs` job produced zero targets. The ServiceAccount in that manifest belongs to promtail | pre-existing |
+| 3 | The kafka job scraped `kafka-0/1/2:9101` for a JMX exporter. One broker exists, and no exporter was ever deployed | pre-existing |
+| 4 | The default-deny NetworkPolicy allowed ingress only from Kong, refusing Prometheus; and the `kong-admin` Service the scrape targeted was deleted when the Admin API moved to loopback | **introduced by this work** |
+
+Cause 4 is the instructive one. The default-deny rollout was verified against the
+application path — login, order, saga, stock — and passed. It was never checked
+against the observability path, which is the first thing default-deny breaks.
+
+## 13.2 What was added
+
+**Domain metrics**, which did not exist in any form:
+
+| Metric | Exists because |
+|---|---|
+| `orders_pending_oldest_age_seconds` | four orders stranded at PENDING while every other signal was green |
+| `orders_created_total` vs `orders_completed_total{outcome}` | a persistent gap means orders enter the saga and never leave |
+| `payment_without_order_total` | money moved for an order the system cannot find, which the reaper then cancels with no refund path |
+| `saga_duration_seconds` p50/p95/p99 | saga slow or stuck |
+| `inventory_reserve_total{result}` | oversell pressure; accepted should never exceed what existed |
+
+**Nine alert rules**, business first. **A provisioned Grafana dashboard**, 17
+panels: business, then RED, then USE — provisioned from a ConfigMap because a
+dashboard that only exists inside the pod dies with the pod.
+
+## 13.3 Verified
+
+```
+targets                    10/10 up
+15 concurrent orders vs stock 6:
+  orders_created_total     15
+  orders_completed_total   paid=6  cancelled=9        6 + 9 = 15, none lost
+  inventory_reserve_total  accepted=6  rejected=9     accepted == stock
+  orders_pending_count     0
+alert rules                9 loaded, all inactive
+dashboard                  returns real data through Grafana's own /api/ds/query
+```
+
+## 13.4 One more silent failure, found the same way
+
+The dashboard first rendered "No data" on all 17 panels with an error badge on
+each. Prometheus had the data throughout.
+
+The datasource provisioning never declared a `uid`, so Grafana generated
+`PBFA97CFB590B2093`. The dashboard JSON referenced `uid: "prometheus"` — a
+datasource that did not exist. Every panel queried nothing.
+
+Fixed by declaring the uid rather than letting Grafana invent one. Worth noting
+that a generated uid also differs on a fresh install, so the dashboard would have
+broken on the next cluster even if it had worked here.
+
+## 13.5 Still not production
+
+**There is no Alertmanager.** The rules evaluate, fire, and go into
+`alertmanagers: static_configs: targets: []`. Nothing reaches a human.
+
+That matters more than any panel. A dashboard works only while someone is
+watching it. The stranded-order bug happened with nobody watching — what would
+have caught it is `OrdersStuckPending` reaching a phone, and that path does not
+exist yet.
+
+Also missing: routing and on-call, `runbook_url` on alerts, alert grouping and
+silencing for deploys, dashboard variables for drill-down, any Grafana panel that
+reads the Loki logs already being collected, distributed tracing across the
+saga's four services, HA Prometheus, and retention beyond 15 days.

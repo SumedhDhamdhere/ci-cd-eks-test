@@ -193,7 +193,50 @@ flowchart LR
 
 ---
 
-## 6. Per-Service Detail
+---
+
+## 6. Observability
+
+```mermaid
+flowchart LR
+    SVC["6 services<br/>/actuator/prometheus"] --> P[(Prometheus<br/>scrape 15s · 15d)]
+    KONG["Kong<br/>:8100/metrics"] --> P
+    KE["kafka-exporter<br/>consumer lag"] --> P
+    P --> G[Grafana]
+    PROMTAIL[promtail] --> L[(Loki)] --> G
+    P -.rules.-> A["alertmanagers: []<br/>NOTHING LISTENS"]
+```
+
+**Three layers, and the third is the one that matters.**
+
+| Layer | Examples | Answers |
+|---|---|---|
+| RED | request rate, 5xx share, p50/p95/p99 | is the API healthy |
+| USE | JVM heap, GC pause, consumer lag, targets up | is the machine healthy |
+| **Business** | `orders_pending_oldest_age_seconds`, `payment_without_order_total`, `saga_duration_seconds`, `inventory_reserve_total` | **is the business working** |
+
+The business layer exists because of a specific incident. Four orders were
+stranded at PENDING permanently, and every other signal was green: pods healthy,
+consumer lag 0, CPU normal, no exceptions, Grafana reporting `"database": "ok"`.
+Nothing in RED or USE can express *customers' orders are disappearing*. The
+oldest-pending gauge can, and it alerts at two minutes because a healthy saga
+finishes in seconds.
+
+**What this stack does not yet do.** There is no Alertmanager. The nine rules in
+`k8s/monitoring/alerts.yaml` evaluate and fire into
+`alertmanagers: static_configs: targets: []`, so nothing reaches a person. Until
+that is wired to Slack or PagerDuty, this is monitoring you have to be watching —
+and at 3am nobody is watching. Also absent: dashboard variables for drill-down,
+any Grafana panel that reads Loki, distributed tracing across the saga's four
+services, HA Prometheus, and long-term storage beyond 15 days.
+
+**A warning worth keeping.** Grafana being up tells you nothing about whether
+monitoring works. It stores no data — it asks Prometheus. Throughout the period
+when all ten targets were down, Grafana was `1/1 Running` and answering
+`"database": "ok"`, cheerfully drawing empty panels. That is why the cluster
+dashboard shows *targets up* before it shows a single graph.
+
+## 7. Per-Service Detail
 
 | Service | Port | Owns | Publishes | Consumes | Special |
 |---|---|---|---|---|---|

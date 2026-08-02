@@ -444,9 +444,12 @@ journey across all six services, in order.
 ## 8. Plain-text logs
 
 **Evidence:** no `logback-spring.xml` or `log4j2.xml` anywhere → Spring Boot's
-default text format. Loki, Prometheus and Grafana **are** deployed
-(`k8s/monitoring/monitoring.yaml`), so the infrastructure is ready — the log
-format isn't.
+default text format. Loki, Prometheus and Grafana are deployed
+(`k8s/monitoring/`), and Prometheus now scrapes 10/10 targets — but Loki is
+still only receiving unstructured text, and nothing in Grafana reads it. Deployed
+is not the same as wired up: for the whole life of this cluster all ten
+Prometheus targets were down and Grafana had zero dashboards, which nobody
+noticed precisely because Grafana itself looked perfectly healthy.
 
 **Today:**
 ```
@@ -567,7 +570,7 @@ Worth stating, so the list above isn't read as "the project is bad":
 | Parameterized queries everywhere | ✅ no SQL-injection exposure |
 | `POSTGRES_PASSWORD` + Redis `--requirepass` from Secrets | ✅ most demos skip Redis auth |
 | SLF4J, **zero** `System.out.println` | ✅ |
-| Prometheus + Grafana + **Loki** deployed | ✅ ahead of most projects |
+| Prometheus + Grafana + **Loki** deployed | ⚠️ deployed, but collected nothing until fixed — see §Observability |
 | WAF: OWASP + rate limit + SQLi | ✅ |
 | TLS 1.3 only, HTTP→HTTPS 301 | ✅ |
 | ECR `scanOnPush` + keep-10 lifecycle | ✅ |
