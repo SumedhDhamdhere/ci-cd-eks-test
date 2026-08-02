@@ -1,5 +1,12 @@
 # Complete AWS Deployment — Empty Account to Running App
 
+> **Two guides, same destination.**
+> This one runs `scripts/01..05`, which is faster and what you want for a repeat
+> deploy. [AWS-DEPLOYMENT-CLI.md](AWS-DEPLOYMENT-CLI.md) does the identical thing
+> as individual `aws` and `kubectl` commands, with nothing hidden inside a
+> script — use that when you want to see every resource as it is created, or
+> when a script has failed partway and you need to take over by hand.
+
 > **Standalone.** Nothing assumed, nothing referenced elsewhere. Start with an empty
 > AWS account, finish with the application live on HTTPS.
 >
