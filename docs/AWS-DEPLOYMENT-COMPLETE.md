@@ -15,18 +15,25 @@
 | Phase | What | Time |
 |---|---|---|
 | 0 | Prerequisites + AWS account | 15 min |
-| 1 | Fix the code (7 required changes) | 20 min |
+| 1 | Fix the code (3 remaining changes) | 10 min |
 | 2 | Cluster + networking | 20 min |
 | 3 | Cluster add-ons | 10 min |
 | 4 | ECR + build + push images | 15 min |
 | 5 | TLS certificate + DNS | 10 min |
-| 6 | Secrets | 5 min |
+| 6 | Secrets — sealed, not plaintext | 10 min |
 | 7 | Deploy the application | 10 min |
 | 8 | Expose via ALB | 5 min |
-| 9 | Verify | 5 min |
-| 10 | Day-2 operations | — |
-| 11 | Cost control | — |
-| 12 | Teardown | 15 min |
+| 9 | Lock the network down | 5 min |
+| 10 | Observability — and prove it collects | 10 min |
+| 11 | Verify, including the security checks | 10 min |
+| 12 | Day-2 operations | — |
+| 13 | Cost control | — |
+| 14 | Teardown | 15 min |
+
+Phases 9 and 10 are not optional extras. Applying default-deny after the app is
+running is deliberate — it is the order that catches what the policy breaks —
+and the monitoring phase ends by proving the targets are actually **up**, because
+this stack once sat with all ten of them down and nobody noticed.
 
 **Set these once and keep the terminal open** — every phase uses them:
 
@@ -115,8 +122,18 @@ certificate for it, and the HTTPS listener will fail.
 
 # PHASE 1 — Fix the code
 
-**The repository will not deploy to AWS as-is.** Seven changes, all required.
-Do them now — discovering them mid-deploy wastes an hour.
+**The repository still will not deploy to AWS as-is,** but the list is shorter
+than it was. Four of the seven changes this guide used to describe are now in the
+repository:
+
+| Was | Now |
+|---|---|
+| Kong Service → ClusterIP | ✅ done — the Service carried `aws-load-balancer-type: "alb"`, which is not a value the annotation recognises and would have provisioned a second, Classic load balancer beside the ALB |
+| Stop the deploy script editing tracked files | ✅ done — the `sed -i` is gone |
+| Remove the manual target registration | ✅ done — replaced by `k8s/alb/targetgroupbinding.yaml`, so the ALB follows pod restarts instead of holding a snapshot |
+| CPU requests so HPA works | ✅ done |
+
+**Three remain.** Do them now — finding them mid-deploy wastes an hour.
 
 ## 1.1 Registry URL
 
@@ -176,69 +193,7 @@ data:
   SPRING_PROFILE: "prod"
 ```
 
-## 1.4 Kong Service → ClusterIP
-
-`k8s/kong/kong.yaml` has `type: LoadBalancer` plus ALB annotations. Left as-is
-you get a **second, duplicate ALB** alongside the Ingress one.
-
-```bash
-sed -i '/service.beta.kubernetes.io\/aws-load-balancer-type/d;
-        /service.beta.kubernetes.io\/aws-load-balancer-scheme/d' k8s/kong/kong.yaml
-sed -i 's/^  type: LoadBalancer/  type: ClusterIP/' k8s/kong/kong.yaml
-```
-
-## 1.5 Don't let the deploy script edit tracked files
-
-`scripts/05-deploy.sh` line 31 uses `sed -i` on `configmap.yaml`, permanently
-destroying the placeholder and dirtying your working tree.
-
-```bash
-sed -i 's|^sed -i "s\|REGISTRY\|\$REGISTRY\|g" k8s/services/configmap.yaml|sed "s\|REGISTRY\|$REGISTRY\|g" k8s/services/configmap.yaml \| kubectl apply -f -|' scripts/05-deploy.sh
-```
-
-If that substitution looks fragile, just edit the file by hand — change line 31 from:
-```bash
-sed -i "s|REGISTRY|$REGISTRY|g" k8s/services/configmap.yaml
-kubectl apply -f k8s/services/configmap.yaml
-```
-to:
-```bash
-sed "s|REGISTRY|$REGISTRY|g" k8s/services/configmap.yaml | kubectl apply -f -
-```
-
-## 1.6 Remove the manual target registration
-
-`scripts/05-deploy.sh` lines ~70-80 snapshot Kong's pod IPs into an ALB target
-group **once**. After the first pod restart those IPs are dead and you get 503s.
-The ALB controller (Phase 3) does this continuously instead.
-
-Open `scripts/05-deploy.sh` and delete the whole block from
-`echo "=== [6/8] Register Kong in ALB Target Group ==="` through the
-`describe-target-health` call.
-
-## 1.7 CPU requests so HPA works
-
-The manifests define HPAs. HPA computes a **percentage of requested CPU** — with
-no `resources.requests.cpu` there's no denominator, so it reads `<unknown>` and
-never scales.
-
-Check whether they're already set:
-```bash
-grep -c "cpu:" k8s/services/deployments.yaml
-```
-
-If that returns 0, add to each container spec:
-```yaml
-        resources:
-          requests:
-            cpu: 200m
-            memory: 512Mi
-          limits:
-            cpu: 1000m
-            memory: 1Gi
-```
-
-## 1.8 Commit
+## 1.4 Commit
 
 ```bash
 git checkout -b aws-deploy
@@ -583,6 +538,34 @@ aws acm describe-certificate --certificate-arn $CERT_ARN --region $AWS_REGION \
 
 # PHASE 6 — Secrets
 
+> A Kubernetes `Secret` is base64. That is **encoding, not encryption** — anyone
+> with read access to the namespace, and anyone who ever sees the YAML, has the
+> values. `k8s/services/secrets.yaml` must never be committed with real content.
+>
+> The repository ships `k8s/security/sealed-secrets.yaml` instead: the same
+> values encrypted with the cluster's public key, which only the controller's
+> private key can open. That file is safe in Git.
+>
+> ```bash
+> # once per cluster
+> kubectl apply -f https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.27.1/controller.yaml
+> kubectl -n kube-system rollout status deploy/sealed-secrets-controller
+>
+> # seal YOUR values — the committed file is sealed for a different cluster
+> kubeseal --controller-namespace kube-system \
+>          --controller-name sealed-secrets-controller \
+>          --format yaml < k8s/services/secrets.yaml \
+>          > k8s/security/sealed-secrets.yaml
+> ```
+>
+> **The sealing key is per-cluster.** A SealedSecret sealed against one cluster
+> cannot be decrypted by another, so re-seal after every cluster rebuild. The
+> symptom otherwise is pods stuck without their `app-secrets`.
+>
+> `05-deploy.sh` prefers the SealedSecret when the CRD is present and falls back
+> to plaintext with a warning when it is not.
+
+
 ## 6.1 Fill them in
 
 ```bash
@@ -831,9 +814,156 @@ sleep 60 && dig +short $DOMAIN
 
 ---
 
-# PHASE 9 — Verify
 
-## 9.1 Health
+# PHASE 9 — Lock the network down
+
+Kubernetes allows every pod to talk to every other pod. Until this phase, any
+container in the namespace — a compromised service, a debug pod someone left
+running, a malicious image — can reach every Postgres instance, Redis and Kafka,
+and can open outbound connections to anywhere.
+
+Applied **after** the application is running, on purpose. Default-deny takes
+effect the moment it lands, and you want to be watching when it does.
+
+```bash
+kubectl apply -f k8s/security/networkpolicy.yaml
+kubectl -n ecommerce get netpol        # expect 17
+```
+
+## 9.1 What it enforces
+
+Each service reaches **only its own database**. `order-service` cannot open a
+socket to `postgres-user`. `notification-service` reaches Kafka and nothing else.
+That is the database-per-service boundary made real instead of being a naming
+convention.
+
+## 9.2 Verify it — do not assume the CNI enforces anything
+
+```bash
+kubectl -n ecommerce run np-test --image=busybox:1.36 --restart=Never \
+  --command -- sleep 300
+
+# every one of these must FAIL
+kubectl -n ecommerce exec np-test -- timeout 4 nc -z postgres-user 5432
+kubectl -n ecommerce exec np-test -- timeout 4 nc -z redis 6379
+kubectl -n ecommerce exec np-test -- timeout 4 nc -z kafka 9092
+kubectl -n ecommerce exec np-test -- timeout 4 nc -z 1.1.1.1 443
+
+kubectl -n ecommerce delete pod np-test
+```
+
+> **On EKS this is the step people skip and regret.** The AWS VPC CNI does
+> **not** enforce NetworkPolicy unless the network policy agent is enabled:
+>
+> ```bash
+> aws eks update-addon --cluster-name $CLUSTER --addon-name vpc-cni \
+>   --configuration-values '{"enableNetworkPolicy":"true"}'
+> ```
+>
+> Without it the policies apply cleanly, `kubectl get netpol` shows all 17, and
+> **nothing is actually blocked**. Run the busybox test above and believe the
+> result, not the object count.
+
+## 9.3 Then check the application still works
+
+A default-deny rollout that breaks the app is not a fix:
+
+```bash
+bash .github/smoke-test.sh          # 29/29
+```
+
+This is also where an earlier attempt went wrong. The policy was verified against
+the application path and passed — and silently cut Prometheus off from every
+service it scrapes, because only Kong was allowed in. The policy in the repo now
+allows the monitoring namespace on the six service ports. If you write your own,
+remember that observability is the first thing default-deny breaks.
+
+---
+
+# PHASE 10 — Observability, and proof that it collects
+
+Deploying Prometheus and Grafana is the easy half. This stack once ran with all
+ten scrape targets **down** and zero dashboards, and nobody noticed for the life
+of the cluster — because Grafana itself was `1/1 Running` and answering
+`"database": "ok"` the entire time. It stores nothing; it asks Prometheus. Up and
+useless look identical from outside.
+
+```bash
+kubectl apply -f k8s/monitoring/       # the whole directory, not just monitoring.yaml
+```
+
+The directory matters: Prometheus mounts the `prometheus-rules` ConfigMap and
+Grafana mounts `grafana-dashboards` and `grafana-dashboard-provider`, which live
+in `alerts.yaml` and `dashboards.yaml`. Applying only `monitoring.yaml` leaves
+both pods in `ContainerCreating` waiting on a ConfigMap nothing created.
+
+## 10.1 Prove the targets are up
+
+**This is the checkpoint. Do not move on until it passes.**
+
+```bash
+kubectl -n monitoring port-forward svc/prometheus 9090:9090 &
+curl -s 'http://localhost:9090/api/v1/targets?state=active' \
+  | jq -r '.data.activeTargets[] | "\(.health)  \(.labels.job)  \(.scrapeUrl)"'
+```
+
+Every line must read `up`. If any says `down`, read `lastError` — it will be one
+of these four, all of which were real here:
+
+| Symptom | Cause |
+|---|---|
+| `404` on `/actuator/prometheus` | `micrometer-registry-prometheus` missing, or `prometheus` absent from `management.endpoints.web.exposure.include` |
+| all `kubernetes_sd_configs` jobs empty | Prometheus running as the `default` ServiceAccount, which cannot list pods |
+| `connection refused` from the monitoring namespace | NetworkPolicy from Phase 9 does not allow it in |
+| `no such host` for a Kafka broker | the scrape config assumes three brokers and a JMX exporter that was never deployed |
+
+## 10.2 Prove there is business data, not just machine data
+
+```bash
+for q in orders_created_total orders_pending_oldest_age_seconds \
+         inventory_reserve_total kafka_consumergroup_lag; do
+  echo -n "$q -> "
+  curl -s "http://localhost:9090/api/v1/query?query=$q" | jq '.data.result | length'
+done
+```
+
+`orders_pending_oldest_age_seconds` is the one that matters. Four orders once sat
+at PENDING permanently while the pods were healthy, consumer lag was 0, CPU was
+normal and nothing had thrown an exception. No infrastructure metric can express
+*customers' orders are disappearing*. That gauge can, and the alert fires at two
+minutes because a healthy saga finishes in seconds.
+
+## 10.3 Grafana
+
+```bash
+kubectl -n monitoring port-forward svc/grafana 3000:3000 &
+# http://localhost:3000   admin / (GF_SECURITY_ADMIN_PASSWORD)
+```
+
+The dashboard is provisioned from a ConfigMap, not clicked together in the UI —
+one built in the UI dies with the pod.
+
+> If every panel reads **"No data"** with an error badge while Prometheus clearly
+> has the data, check the datasource uid. Grafana generates one unless you
+> declare it, and a provisioned dashboard that names `uid: prometheus` will match
+> nothing. `k8s/monitoring/monitoring.yaml` declares it for exactly this reason —
+> and a generated uid also differs on a fresh install, so the dashboard would
+> break on the next cluster even if it worked on this one.
+
+## 10.4 What is still missing
+
+**There is no Alertmanager.** The nine rules in `alerts.yaml` evaluate and fire
+into `alertmanagers: static_configs: targets: []`. Nothing reaches a person.
+
+Before calling this production, deploy Alertmanager and route `severity: critical`
+to a pager and `warning` to chat. A dashboard only works while someone is
+watching it, and the incident this stack was built around happened at a moment
+when nobody was.
+
+---
+# PHASE 11 — Verify
+
+## 11.1 Health
 
 ```bash
 kubectl -n ecommerce get pods,svc,ingress,hpa
@@ -846,7 +976,7 @@ aws elbv2 describe-target-health --target-group-arn $TG --region $AWS_REGION \
   --query 'TargetHealthDescriptions[].TargetHealth.State' --output text    # healthy healthy
 ```
 
-## 9.2 End to end
+## 11.2 End to end
 
 ```bash
 export KONG_URL=https://$DOMAIN
@@ -856,7 +986,7 @@ bash .github/smoke-test.sh
 This exercises **16 endpoints** and pushes a real order through the entire saga to
 `PAID` — order → Kafka → inventory (Redis lock) → Kafka → payment → notification.
 
-## 9.3 By hand
+## 11.3 By hand
 
 ```bash
 curl -sX POST https://$DOMAIN/api/users/register \
@@ -889,15 +1019,88 @@ curl -s https://$DOMAIN/api/orders/1 -H "Authorization: Bearer $TOKEN" | jq .sta
 kubectl -n ecommerce logs -l app=order-service -f --tail=20
 ```
 
-## 9.4 Monitoring
+## 11.4 Monitoring
 
 ```bash
 kubectl -n monitoring port-forward svc/grafana 3000:3000    # admin/admin
 ```
 
+## 11.5 The security checks — the ones that actually regress
+
+Every request below returned **200** before the services verified tokens for
+themselves. Five of the six had no security configuration at all: the gateway
+issued a JWT and nothing ever checked it.
+
+```bash
+API=https://api.$DOMAIN
+BODY='{"shippingAddress":"x","items":[{"productId":1,"productName":"p","quantity":1,"price":10}]}'
+
+# all five must be 403
+curl -s -o /dev/null -w "orders   no token  -> %{http_code}
+" -X POST $API/api/orders -H 'Content-Type: application/json' -d "$BODY"
+curl -s -o /dev/null -w "orders   bad token -> %{http_code}
+" -X POST $API/api/orders -H 'Authorization: Bearer not.a.token' -H 'Content-Type: application/json' -d "$BODY"
+curl -s -o /dev/null -w "orders/user/1      -> %{http_code}
+" $API/api/orders/user/1
+curl -s -o /dev/null -w "products no token  -> %{http_code}
+" -X POST $API/api/products -H 'Content-Type: application/json' -d '{"name":"x","price":1,"category":"c"}'
+curl -s -o /dev/null -w "restock  no token  -> %{http_code}
+" -X POST $API/api/inventory/1/restock -H 'Content-Type: application/json' -d '{"quantity":9999}'
+```
+
+The restock one is the expensive one: an anonymous caller could set any product
+to any quantity.
+
+**Ownership.** With a valid token of your own, another user's order must not be
+readable:
+
+```bash
+curl -s -o /dev/null -w "someone else's order -> %{http_code}
+"   -H "Authorization: Bearer $MY_TOKEN" $API/api/orders/$THEIR_ORDER_ID
+```
+
+Expect **404**, not 403. 403 confirms the id is real, which is all an attacker
+needs to walk the order table one id at a time.
+
+**A userId in the body must be ignored.** It used to be obeyed, which let any
+caller book an order in anyone's name:
+
+```bash
+curl -s -X POST $API/api/orders -H "Authorization: Bearer $MY_TOKEN"   -H 'Content-Type: application/json'   -d '{"userId":999999,"shippingAddress":"forged","items":[...]}' | jq .userId
+# must be YOUR id, not 999999
+```
+
+`.github/smoke-test.sh` runs all of the above plus the saga, as three separate
+principals. **29 checks, and the denials are the point** — they are the
+regression nothing else would notice.
+
+## 11.6 Does the ALB actually follow the pods
+
+The single most common way this deployment rots: the target group holds the IP of
+a pod that no longer exists.
+
+```bash
+TG=$(aws elbv2 describe-target-groups --names ecommerce-kong-tg       --query 'TargetGroups[0].TargetGroupArn' --output text)
+
+aws elbv2 describe-target-health --target-group-arn $TG   --query 'TargetHealthDescriptions[].Target.Id' --output text
+kubectl -n ecommerce get pods -l app=kong -o jsonpath='{range .items[*]}{.status.podIP}{"
+"}{end}'
+```
+
+The two lists must match. Then kill a Kong pod and watch them match again within
+about fifteen seconds — that is the `TargetGroupBinding` doing its job. If they
+drift apart and stay apart, the AWS Load Balancer Controller is not running or
+its `serviceRef.port` is wrong.
+
+> `serviceRef.port` is the **Service** port (80), not the container port (8000).
+> Given the container port the controller reports `Successfully reconciled` while
+> logging `BackendNotFound`, and the target group stays empty. Check the targets,
+> not the status.
+
+
 ---
 
-# PHASE 10 — Day-2 operations
+# PHASE 12 — Day-2 operations
 
 **Deploy a new version**
 ```bash
@@ -943,7 +1146,7 @@ kubectl -n ecommerce exec kafka-0 -- kafka-console-consumer \
 
 ---
 
-# PHASE 11 — Cost control
+# PHASE 13 — Cost control
 
 Roughly **$5-8/day** with this setup:
 
@@ -970,7 +1173,7 @@ Cost budget → $20/month → alert at 80%.
 
 ---
 
-# PHASE 12 — Teardown
+# PHASE 14 — Teardown
 
 **Order matters** — Kubernetes-created AWS resources must go before the cluster.
 
